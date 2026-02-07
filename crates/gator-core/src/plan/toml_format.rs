@@ -1,0 +1,138 @@
+//! TOML format types for plan definition files.
+//!
+//! These types map directly to the `plan.toml` on-disk format and are
+//! deserialized via `serde` + the `toml` crate.
+
+use serde::{Deserialize, Serialize};
+
+/// Top-level structure of a `plan.toml` file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlanToml {
+    /// Plan metadata.
+    pub plan: PlanMeta,
+    /// Tasks within the plan.
+    #[serde(default)]
+    pub tasks: Vec<TaskToml>,
+}
+
+/// Plan-level metadata in `[plan]`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlanMeta {
+    /// Human-readable plan name.
+    pub name: String,
+    /// Git branch to use as the base for task branches.
+    pub base_branch: String,
+}
+
+/// A single `[[tasks]]` entry in the plan TOML.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TaskToml {
+    /// Unique task name within the plan (used as an identifier in `depends_on`).
+    pub name: String,
+    /// Multi-line description of what the task should accomplish.
+    pub description: String,
+    /// Scope level: "narrow", "medium", or "broad".
+    pub scope: String,
+    /// Gate policy: "auto", "human_review", or "human_approve".
+    pub gate: String,
+    /// Maximum retry attempts before escalation.
+    #[serde(default = "default_retry_max")]
+    pub retry_max: i32,
+    /// Names of tasks this task depends on (must complete first).
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    /// Names of invariants to link to this task.
+    #[serde(default)]
+    pub invariants: Vec<String>,
+}
+
+fn default_retry_max() -> i32 {
+    3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_minimal_plan() {
+        let toml_str = r#"
+[plan]
+name = "Test plan"
+base_branch = "main"
+
+[[tasks]]
+name = "task-one"
+description = "Do something"
+scope = "narrow"
+gate = "auto"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.name, "Test plan");
+        assert_eq!(plan.plan.base_branch, "main");
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(plan.tasks[0].name, "task-one");
+        assert_eq!(plan.tasks[0].retry_max, 3); // default
+        assert!(plan.tasks[0].depends_on.is_empty());
+        assert!(plan.tasks[0].invariants.is_empty());
+    }
+
+    #[test]
+    fn deserialize_full_plan() {
+        let toml_str = r#"
+[plan]
+name = "Add user authentication"
+base_branch = "main"
+
+[[tasks]]
+name = "implement-jwt-module"
+description = """
+Implement JWT token generation and validation.
+- Create src/auth/jwt.rs
+- Implement sign() and verify() functions
+- Use RS256 algorithm
+"""
+scope = "narrow"
+gate = "auto"
+retry_max = 3
+depends_on = []
+invariants = ["rust_build", "rust_test", "rust_clippy"]
+
+[[tasks]]
+name = "implement-login-endpoint"
+description = "Create the /login endpoint."
+scope = "medium"
+gate = "human_review"
+depends_on = ["implement-jwt-module"]
+invariants = ["rust_build", "rust_test"]
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.name, "Add user authentication");
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[0].invariants.len(), 3);
+        assert_eq!(plan.tasks[1].depends_on, vec!["implement-jwt-module"]);
+    }
+
+    #[test]
+    fn roundtrip_serialize_deserialize() {
+        let plan = PlanToml {
+            plan: PlanMeta {
+                name: "Roundtrip test".to_owned(),
+                base_branch: "develop".to_owned(),
+            },
+            tasks: vec![TaskToml {
+                name: "t1".to_owned(),
+                description: "First task".to_owned(),
+                scope: "narrow".to_owned(),
+                gate: "auto".to_owned(),
+                retry_max: 2,
+                depends_on: vec![],
+                invariants: vec!["check".to_owned()],
+            }],
+        };
+
+        let serialized = toml::to_string(&plan).expect("should serialize");
+        let deserialized: PlanToml = toml::from_str(&serialized).expect("should deserialize");
+        assert_eq!(plan, deserialized);
+    }
+}

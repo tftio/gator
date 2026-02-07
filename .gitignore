@@ -1,0 +1,8 @@
+# Rust build output
+target/
+
+# Editor swap files
+*.swp
+
+# Environment variables
+.env

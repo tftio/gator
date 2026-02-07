@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo test:*)",
+      "Bash(echo:*)",
+      "Bash(for i in 1 2 3)",
+      "Bash(do echo \"=== Run $i ===\")",
+      "Bash(done)",
+      "Bash(RUST_LOG=gator_core=debug cargo test:*)",
+      "Bash(for i in 1 2 3 4 5)"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+[package]
+name = "gator-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "gator"
+path = "src/main.rs"
+
+[dependencies]
+gator-core = { path = "../gator-core" }
+gator-db = { path = "../gator-db" }
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

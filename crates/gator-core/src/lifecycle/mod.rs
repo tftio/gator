@@ -1,0 +1,278 @@
+//! Agent lifecycle manager: runs a single agent task from assignment through
+//! gate evaluation.
+//!
+//! The lifecycle function manages the full sequence: create worktree, generate
+//! token, materialize task, spawn agent, collect events, run gate, evaluate
+//! verdict.
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use futures::StreamExt;
+use sqlx::PgPool;
+use tracing;
+use uuid::Uuid;
+
+use gator_db::models::Task;
+use gator_db::queries::agent_events::{self, NewAgentEvent};
+use gator_db::queries::invariants as inv_db;
+
+use crate::gate::evaluator::{evaluate_verdict, GateAction};
+use crate::gate::GateRunner;
+use crate::harness::types::{AgentEvent, MaterializedTask};
+use crate::harness::Harness;
+use crate::plan::materialize_task;
+use crate::state::dispatch;
+use crate::token::{self, TokenConfig};
+use crate::worktree::WorktreeManager;
+
+/// Result of running an agent through its full lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LifecycleResult {
+    /// All invariants passed.
+    Passed,
+    /// Invariants failed but the task is eligible for retry.
+    FailedCanRetry,
+    /// Invariants failed and no retries remain.
+    FailedNoRetry,
+    /// The task's gate policy requires human intervention.
+    HumanRequired,
+    /// The agent timed out.
+    TimedOut,
+}
+
+/// Configuration for the agent lifecycle.
+#[derive(Debug, Clone)]
+pub struct LifecycleConfig {
+    /// Maximum wall time for the agent to complete.
+    pub timeout: Duration,
+}
+
+/// Run the full lifecycle for a single agent task.
+///
+/// Steps:
+/// 1. Create worktree
+/// 2. Generate scoped token
+/// 3. Materialize task (includes retry feedback if attempt > 0)
+/// 4. Build MaterializedTask with env vars
+/// 5. Assign task (pending -> assigned)
+/// 6. Spawn agent
+/// 7. Start task (assigned -> running)
+/// 8. Collect events with timeout
+/// 9. Run gate
+/// 10. Evaluate verdict -> return LifecycleResult
+pub async fn run_agent_lifecycle(
+    pool: &PgPool,
+    task: &Task,
+    plan_name: &str,
+    harness: &dyn Harness,
+    worktree_manager: &WorktreeManager,
+    token_config: &TokenConfig,
+    config: &LifecycleConfig,
+) -> Result<LifecycleResult> {
+    let task_id = task.id;
+    let attempt = task.attempt as u32;
+
+    tracing::info!(
+        task_id = %task_id,
+        task_name = %task.name,
+        attempt = attempt,
+        "starting agent lifecycle"
+    );
+
+    // 1. Create worktree.
+    let branch_name = WorktreeManager::branch_name(plan_name, &task.name);
+    let wt_info = worktree_manager
+        .create_worktree(&branch_name)
+        .with_context(|| format!("failed to create worktree for task {}", task.name))?;
+
+    let worktree_path = wt_info.path.clone();
+
+    // 2. Generate scoped token.
+    let agent_token = token::generate_token(token_config, task_id, attempt);
+
+    // 3. Materialize task description.
+    let task_description = materialize_task(pool, task_id)
+        .await
+        .with_context(|| format!("failed to materialize task {}", task.name))?;
+
+    // 4. Build MaterializedTask.
+    let invariants = inv_db::get_invariants_for_task(pool, task_id).await?;
+    let invariant_commands: Vec<String> = invariants
+        .iter()
+        .map(|inv| {
+            if inv.args.is_empty() {
+                inv.command.clone()
+            } else {
+                format!("{} {}", inv.command, inv.args.join(" "))
+            }
+        })
+        .collect();
+
+    let mut env_vars = HashMap::new();
+    env_vars.insert("GATOR_AGENT_TOKEN".to_string(), agent_token);
+    // Forward database URL if available.
+    if let Ok(db_url) = std::env::var("GATOR_DATABASE_URL") {
+        env_vars.insert("GATOR_DATABASE_URL".to_string(), db_url);
+    }
+    // Always forward the token secret from the resolved config.
+    env_vars.insert(
+        "GATOR_TOKEN_SECRET".to_string(),
+        hex::encode(&token_config.secret),
+    );
+
+    let materialized = MaterializedTask {
+        task_id,
+        name: task.name.clone(),
+        description: task_description,
+        invariant_commands,
+        working_dir: worktree_path.clone(),
+        env_vars,
+    };
+
+    // 5. Assign task (pending -> assigned).
+    dispatch::assign_task(pool, task_id, harness.name(), &worktree_path)
+        .await
+        .with_context(|| format!("failed to assign task {}", task.name))?;
+
+    // 6. Spawn agent.
+    let handle = harness
+        .spawn(&materialized)
+        .await
+        .with_context(|| format!("failed to spawn agent for task {}", task.name))?;
+
+    // 7. Start task (assigned -> running).
+    dispatch::start_task(pool, task_id)
+        .await
+        .with_context(|| format!("failed to start task {}", task.name))?;
+
+    // 8. Collect events with timeout.
+    let event_stream = harness.events(&handle);
+    let collect_result = tokio::time::timeout(
+        config.timeout,
+        collect_events(pool, task_id, task.attempt, event_stream),
+    )
+    .await;
+
+    match collect_result {
+        Ok(Ok(())) => {
+            tracing::info!(task_id = %task_id, "agent completed normally");
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(task_id = %task_id, error = %e, "error collecting events");
+            // Continue to gate check anyway.
+        }
+        Err(_elapsed) => {
+            tracing::warn!(task_id = %task_id, "agent timed out");
+            // Kill the agent.
+            if let Err(e) = harness.kill(&handle).await {
+                tracing::warn!(task_id = %task_id, error = %e, "failed to kill timed-out agent");
+            }
+            // Transition running -> checking -> failed.
+            dispatch::begin_checking(pool, task_id).await?;
+            dispatch::fail_task(pool, task_id).await?;
+            return Ok(LifecycleResult::TimedOut);
+        }
+    }
+
+    // 9. Run gate.
+    let gate_runner = GateRunner::new(pool);
+    let verdict = gate_runner
+        .run_gate(task_id)
+        .await
+        .with_context(|| format!("gate check failed for task {}", task.name))?;
+
+    // 10. Evaluate verdict.
+    let action = evaluate_verdict(pool, task_id, &verdict)
+        .await
+        .with_context(|| format!("failed to evaluate verdict for task {}", task.name))?;
+
+    let result = match action {
+        GateAction::AutoPassed => LifecycleResult::Passed,
+        GateAction::AutoFailed { can_retry: true } => LifecycleResult::FailedCanRetry,
+        GateAction::AutoFailed { can_retry: false } => LifecycleResult::FailedNoRetry,
+        GateAction::HumanRequired => LifecycleResult::HumanRequired,
+    };
+
+    tracing::info!(
+        task_id = %task_id,
+        task_name = %task.name,
+        result = ?result,
+        "agent lifecycle completed"
+    );
+
+    Ok(result)
+}
+
+/// Collect events from an agent's event stream and persist them to the DB.
+///
+/// Events are inserted best-effort; a failure to persist one event does not
+/// stop the collection. The function returns when the stream yields
+/// `AgentEvent::Completed` or the stream ends.
+async fn collect_events(
+    pool: &PgPool,
+    task_id: Uuid,
+    attempt: i32,
+    mut stream: std::pin::Pin<Box<dyn futures::Stream<Item = AgentEvent> + Send>>,
+) -> Result<()> {
+    while let Some(event) = stream.next().await {
+        let is_completed = matches!(event, AgentEvent::Completed);
+
+        let (event_type, payload) = serialize_agent_event(&event);
+        let new_event = NewAgentEvent {
+            task_id,
+            attempt,
+            event_type,
+            payload,
+        };
+
+        // Best-effort insert.
+        if let Err(e) = agent_events::insert_agent_event(pool, &new_event).await {
+            tracing::warn!(
+                task_id = %task_id,
+                error = %e,
+                "failed to persist agent event (best-effort)"
+            );
+        }
+
+        if is_completed {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+/// Serialize an AgentEvent into (event_type, payload) for DB storage.
+fn serialize_agent_event(event: &AgentEvent) -> (String, serde_json::Value) {
+    match event {
+        AgentEvent::Message { role, content } => (
+            "message".to_string(),
+            serde_json::json!({"role": role, "content": content}),
+        ),
+        AgentEvent::ToolCall { tool, input } => (
+            "tool_call".to_string(),
+            serde_json::json!({"tool": tool, "input": input}),
+        ),
+        AgentEvent::ToolResult { tool, output } => (
+            "tool_result".to_string(),
+            serde_json::json!({"tool": tool, "output": output}),
+        ),
+        AgentEvent::TokenUsage {
+            input_tokens,
+            output_tokens,
+        } => (
+            "token_usage".to_string(),
+            serde_json::json!({"input_tokens": input_tokens, "output_tokens": output_tokens}),
+        ),
+        AgentEvent::Error { message } => (
+            "error".to_string(),
+            serde_json::json!({"message": message}),
+        ),
+        AgentEvent::Completed => (
+            "completed".to_string(),
+            serde_json::json!({}),
+        ),
+    }
+}
