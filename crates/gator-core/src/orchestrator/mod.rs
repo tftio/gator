@@ -15,10 +15,10 @@ use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
 use crate::harness::HarnessRegistry;
+use crate::isolation::Isolation;
 use crate::lifecycle::{run_agent_lifecycle, LifecycleConfig, LifecycleResult};
 use crate::state::dispatch;
 use crate::token::TokenConfig;
-use crate::worktree::WorktreeManager;
 
 /// Configuration for the orchestrator.
 #[derive(Debug, Clone)]
@@ -95,7 +95,7 @@ pub async fn run_orchestrator(
     pool: &PgPool,
     plan_id: Uuid,
     registry: &Arc<HarnessRegistry>,
-    worktree_manager: &WorktreeManager,
+    isolation: &Arc<dyn Isolation>,
     token_config: &TokenConfig,
     config: &OrchestratorConfig,
 ) -> Result<OrchestratorResult> {
@@ -105,6 +105,7 @@ pub async fn run_orchestrator(
         .with_context(|| format!("plan {} not found", plan_id))?;
 
     let plan_name = plan.name.clone();
+    let default_harness = plan.default_harness.clone();
 
     // 1. Restart recovery: reset orphaned tasks.
     let orphaned = task_db::reset_orphaned_tasks(pool, plan_id).await?;
@@ -247,7 +248,7 @@ pub async fn run_orchestrator(
             let pool_clone = pool.clone();
             let plan_name_clone = plan_name.clone();
             let registry_clone = Arc::clone(registry);
-            let wt_manager = worktree_manager.clone();
+            let isolation_clone = Arc::clone(isolation);
             let token_cfg = token_config.clone();
             let lifecycle_config = LifecycleConfig {
                 timeout: config.task_timeout,
@@ -256,12 +257,27 @@ pub async fn run_orchestrator(
             let task_name = task.name.clone();
             let task_id = task.id;
 
-            // Choose harness: use first registered harness.
-            let harness_name = registry_clone
-                .list()
-                .first()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "claude-code".to_string());
+            // Choose harness: per-task > plan default > first registered.
+            let preferred = task.requested_harness.clone()
+                .unwrap_or_else(|| default_harness.clone());
+
+            let harness_name = if registry_clone.get(&preferred).is_some() {
+                preferred
+            } else if let Some(first) = registry_clone.list().first() {
+                tracing::warn!(
+                    task_name = %task.name,
+                    preferred = %preferred,
+                    fallback = %first,
+                    "preferred harness not found, falling back to first registered"
+                );
+                first.to_string()
+            } else {
+                tracing::error!(
+                    task_name = %task.name,
+                    "no harnesses registered, skipping task"
+                );
+                continue;
+            };
 
             in_flight += 1;
 
@@ -275,7 +291,7 @@ pub async fn run_orchestrator(
                     &task,
                     &plan_name_clone,
                     harness,
-                    &wt_manager,
+                    isolation_clone.as_ref(),
                     &token_cfg,
                     &lifecycle_config,
                 )

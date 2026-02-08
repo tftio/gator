@@ -22,6 +22,7 @@ use gator_db::queries::tasks as task_db;
 
 use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::{Harness, HarnessRegistry};
+use gator_core::isolation::{Isolation, worktree::WorktreeIsolation};
 use gator_core::orchestrator::{run_orchestrator, OrchestratorConfig, OrchestratorResult};
 use gator_core::token::TokenConfig;
 use gator_core::worktree::WorktreeManager;
@@ -65,6 +66,10 @@ impl TestHarness {
     fn worktree_manager(&self) -> WorktreeManager {
         WorktreeManager::new(&self.repo_path, Some(self.worktree_base()))
             .expect("failed to create WorktreeManager")
+    }
+
+    fn isolation(&self) -> Arc<dyn Isolation> {
+        Arc::new(WorktreeIsolation::new(self.worktree_manager()))
     }
 
     async fn teardown(self) {
@@ -259,13 +264,15 @@ async fn single_task_passes_completes_plan() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
     let task = task_db::insert_task(
-        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0,
+        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None,
     )
     .await
     .unwrap();
@@ -274,11 +281,12 @@ async fn single_task_passes_completes_plan() {
         .unwrap();
 
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -309,13 +317,15 @@ async fn two_independent_tasks_both_pass() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
     let task_a = task_db::insert_task(
-        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0,
+        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None,
     )
     .await
     .unwrap();
@@ -324,7 +334,7 @@ async fn two_independent_tasks_both_pass() {
         .unwrap();
 
     let task_b = task_db::insert_task(
-        pool, plan.id, "task-b", "Task B", "narrow", "auto", 0,
+        pool, plan.id, "task-b", "Task B", "narrow", "auto", 0, None,
     )
     .await
     .unwrap();
@@ -333,11 +343,12 @@ async fn two_independent_tasks_both_pass() {
         .unwrap();
 
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -365,13 +376,15 @@ async fn sequential_dependency_runs_in_order() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
     let task_a = task_db::insert_task(
-        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0,
+        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None,
     )
     .await
     .unwrap();
@@ -380,7 +393,7 @@ async fn sequential_dependency_runs_in_order() {
         .unwrap();
 
     let task_b = task_db::insert_task(
-        pool, plan.id, "task-b", "Task B depends on A", "narrow", "auto", 0,
+        pool, plan.id, "task-b", "Task B depends on A", "narrow", "auto", 0, None,
     )
     .await
     .unwrap();
@@ -392,11 +405,12 @@ async fn sequential_dependency_runs_in_order() {
         .unwrap();
 
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -434,13 +448,15 @@ async fn fail_no_retry_escalates_to_failed() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
     let task = task_db::insert_task(
-        pool, plan.id, "fail-task", "Will fail", "narrow", "auto", 0,
+        pool, plan.id, "fail-task", "Will fail", "narrow", "auto", 0, None,
     )
     .await
     .unwrap();
@@ -449,11 +465,12 @@ async fn fail_no_retry_escalates_to_failed() {
         .unwrap();
 
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -492,6 +509,8 @@ async fn restart_recovery_resets_orphaned_tasks() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -502,7 +521,7 @@ async fn restart_recovery_resets_orphaned_tasks() {
 
     let task = task_db::insert_task(
         pool, plan.id, "orphan-task", "Was running when crash happened",
-        "narrow", "auto", 3,
+        "narrow", "auto", 3, None,
     )
     .await
     .unwrap();
@@ -543,11 +562,12 @@ async fn restart_recovery_resets_orphaned_tasks() {
     // Now run the orchestrator -- it should detect the orphaned task, reset it,
     // retry it, and complete the plan.
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -594,6 +614,8 @@ async fn fail_then_retry_then_pass() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -601,7 +623,7 @@ async fn fail_then_retry_then_pass() {
 
     let task = task_db::insert_task(
         pool, plan.id, "retry-task", "Will fail then retry",
-        "narrow", "auto", 1,
+        "narrow", "auto", 1, None,
     )
     .await
     .unwrap();
@@ -610,11 +632,12 @@ async fn fail_then_retry_then_pass() {
         .unwrap();
 
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -654,6 +677,8 @@ async fn human_review_pauses_then_resumes_on_approve() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -663,7 +688,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
     // checking state for human approval.
     let task = task_db::insert_task(
         pool, plan.id, "review-task", "Needs human review",
-        "medium", "human_review", 0,
+        "medium", "human_review", 0, None,
     )
     .await
     .unwrap();
@@ -672,6 +697,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
         .unwrap();
 
     let registry = make_registry(PassingMockHarness);
+    let isolation = harness.isolation();
     let config = OrchestratorConfig {
         max_agents: 4,
         task_timeout: Duration::from_secs(30),
@@ -682,7 +708,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &config,
     )
@@ -712,7 +738,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &config,
     )

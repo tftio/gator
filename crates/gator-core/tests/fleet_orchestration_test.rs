@@ -27,6 +27,7 @@ use gator_db::queries::tasks as task_db;
 
 use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::{Harness, HarnessRegistry};
+use gator_core::isolation::{Isolation, worktree::WorktreeIsolation};
 use gator_core::orchestrator::{run_orchestrator, OrchestratorConfig, OrchestratorResult};
 use gator_core::token::TokenConfig;
 use gator_core::worktree::WorktreeManager;
@@ -70,6 +71,10 @@ impl TestHarness {
     fn worktree_manager(&self) -> WorktreeManager {
         WorktreeManager::new(&self.repo_path, Some(self.worktree_base()))
             .expect("failed to create WorktreeManager")
+    }
+
+    fn isolation(&self) -> Arc<dyn Isolation> {
+        Arc::new(WorktreeIsolation::new(self.worktree_manager()))
     }
 
     async fn teardown(self) {
@@ -290,7 +295,7 @@ async fn create_diamond_dag(
     invariant_id: Uuid,
     retry_max: i32,
 ) -> (Uuid, HashMap<String, Uuid>) {
-    let plan = plan_db::insert_plan(pool, "diamond-plan", repo_path, "main", None)
+    let plan = plan_db::insert_plan(pool, "diamond-plan", repo_path, "main", None, "claude-code", "worktree")
         .await
         .expect("insert plan");
 
@@ -306,6 +311,7 @@ async fn create_diamond_dag(
         "narrow",
         "auto",
         retry_max,
+        None,
     )
     .await
     .expect("insert foundation");
@@ -321,6 +327,7 @@ async fn create_diamond_dag(
         "narrow",
         "auto",
         retry_max,
+        None,
     )
     .await
     .expect("insert api-layer");
@@ -339,6 +346,7 @@ async fn create_diamond_dag(
         "narrow",
         "auto",
         retry_max,
+        None,
     )
     .await
     .expect("insert frontend");
@@ -357,6 +365,7 @@ async fn create_diamond_dag(
         "narrow",
         "auto",
         retry_max,
+        None,
     )
     .await
     .expect("insert integration");
@@ -422,12 +431,13 @@ async fn diamond_dag_topological_order() {
     let mock = ConfigurableMockHarness::new(HashMap::new());
     let spawn_log = mock.spawn_log.clone();
     let registry = make_registry(mock);
+    let isolation = harness.isolation();
 
     let result = run_orchestrator(
         pool,
         plan_id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -509,6 +519,8 @@ async fn retry_with_escalation() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -522,6 +534,7 @@ async fn retry_with_escalation() {
         "narrow",
         "auto",
         1, // 1 retry allowed
+        None,
     )
     .await
     .unwrap();
@@ -531,12 +544,13 @@ async fn retry_with_escalation() {
 
     let mock = ConfigurableMockHarness::new(HashMap::new());
     let registry = make_registry(mock);
+    let isolation = harness.isolation();
 
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -594,6 +608,8 @@ async fn timeout_kills_agent() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -607,6 +623,7 @@ async fn timeout_kills_agent() {
         "narrow",
         "auto",
         0, // no retries
+        None,
     )
     .await
     .unwrap();
@@ -618,12 +635,13 @@ async fn timeout_kills_agent() {
     behaviors.insert("hanging-task".to_string(), TaskBehavior::Hang);
     let mock = ConfigurableMockHarness::new(behaviors);
     let registry = make_registry(mock);
+    let isolation = harness.isolation();
 
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -678,6 +696,8 @@ async fn restart_recovery() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -694,6 +714,7 @@ async fn restart_recovery() {
         "narrow",
         "auto",
         3,
+        None,
     )
     .await
     .unwrap();
@@ -728,12 +749,13 @@ async fn restart_recovery() {
 
     let mock = ConfigurableMockHarness::new(HashMap::new());
     let registry = make_registry(mock);
+    let isolation = harness.isolation();
 
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,
@@ -781,6 +803,8 @@ async fn status_and_log_after_run() {
         &harness.repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .unwrap();
@@ -794,6 +818,7 @@ async fn status_and_log_after_run() {
         "narrow",
         "auto",
         0,
+        None,
     )
     .await
     .unwrap();
@@ -803,12 +828,13 @@ async fn status_and_log_after_run() {
 
     let mock = ConfigurableMockHarness::new(HashMap::new());
     let registry = make_registry(mock);
+    let isolation = harness.isolation();
 
     let result = run_orchestrator(
         pool,
         plan.id,
         &registry,
-        &harness.worktree_manager(),
+        &isolation,
         &test_token_config(),
         &OrchestratorConfig {
             max_agents: 4,

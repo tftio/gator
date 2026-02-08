@@ -22,10 +22,10 @@ use crate::gate::evaluator::{evaluate_verdict, GateAction};
 use crate::gate::GateRunner;
 use crate::harness::types::{AgentEvent, MaterializedTask};
 use crate::harness::Harness;
+use crate::isolation::Isolation;
 use crate::plan::materialize_task;
 use crate::state::dispatch;
 use crate::token::{self, TokenConfig};
-use crate::worktree::WorktreeManager;
 
 /// Result of running an agent through its full lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +67,7 @@ pub async fn run_agent_lifecycle(
     task: &Task,
     plan_name: &str,
     harness: &dyn Harness,
-    worktree_manager: &WorktreeManager,
+    isolation: &dyn Isolation,
     token_config: &TokenConfig,
     config: &LifecycleConfig,
 ) -> Result<LifecycleResult> {
@@ -81,13 +81,13 @@ pub async fn run_agent_lifecycle(
         "starting agent lifecycle"
     );
 
-    // 1. Create worktree.
-    let branch_name = WorktreeManager::branch_name(plan_name, &task.name);
-    let wt_info = worktree_manager
-        .create_worktree(&branch_name)
-        .with_context(|| format!("failed to create worktree for task {}", task.name))?;
+    // 1. Create workspace via isolation backend.
+    let workspace = isolation
+        .create_workspace(plan_name, &task.name)
+        .await
+        .with_context(|| format!("failed to create workspace for task {}", task.name))?;
 
-    let worktree_path = wt_info.path.clone();
+    let worktree_path = workspace.path.clone();
 
     // 2. Generate scoped token.
     let agent_token = token::generate_token(token_config, task_id, attempt);
@@ -121,6 +121,10 @@ pub async fn run_agent_lifecycle(
         "GATOR_TOKEN_SECRET".to_string(),
         hex::encode(&token_config.secret),
     );
+    // If running in a container, expose the container ID.
+    if let Some(ref cid) = workspace.container_id {
+        env_vars.insert("GATOR_CONTAINER_ID".to_string(), cid.clone());
+    }
 
     let materialized = MaterializedTask {
         task_id,

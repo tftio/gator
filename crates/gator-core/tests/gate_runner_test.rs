@@ -122,6 +122,7 @@ async fn create_test_task(
         "narrow",
         gate_policy,
         retry_max,
+        None,
     )
     .await
     .expect("failed to insert test task")

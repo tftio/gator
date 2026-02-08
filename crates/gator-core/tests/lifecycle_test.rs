@@ -23,8 +23,11 @@ use gator_db::queries::invariants::{self, NewInvariant};
 use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
+use std::sync::Arc;
+
 use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::Harness;
+use gator_core::isolation::{Isolation, worktree::WorktreeIsolation};
 use gator_core::lifecycle::{run_agent_lifecycle, LifecycleConfig, LifecycleResult};
 use gator_core::token::TokenConfig;
 use gator_core::worktree::WorktreeManager;
@@ -68,6 +71,10 @@ impl TestHarness {
     fn worktree_manager(&self) -> WorktreeManager {
         WorktreeManager::new(&self.repo_path, Some(self.worktree_base()))
             .expect("failed to create WorktreeManager")
+    }
+
+    fn isolation(&self) -> Arc<dyn Isolation> {
+        Arc::new(WorktreeIsolation::new(self.worktree_manager()))
     }
 
     async fn teardown(self) {
@@ -267,6 +274,8 @@ async fn setup_passing_task(pool: &PgPool, repo_path: &Path) -> (Uuid, gator_db:
         &repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .expect("insert plan");
@@ -283,6 +292,7 @@ async fn setup_passing_task(pool: &PgPool, repo_path: &Path) -> (Uuid, gator_db:
         "narrow",
         "auto",
         3,
+        None,
     )
     .await
     .expect("insert task");
@@ -323,6 +333,8 @@ async fn setup_failing_task(
         &repo_path.to_string_lossy(),
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .expect("insert plan");
@@ -339,6 +351,7 @@ async fn setup_failing_task(
         "narrow",
         "auto",
         retry_max,
+        None,
     )
     .await
     .expect("insert task");
@@ -389,12 +402,13 @@ async fn happy_path_lifecycle_passes() {
         false,
     );
 
+    let isolation = harness.isolation();
     let result = run_agent_lifecycle(
         pool,
         &task,
         "lifecycle-plan",
         &mock,
-        &harness.worktree_manager(),
+        isolation.as_ref(),
         &test_token_config(),
         &LifecycleConfig {
             timeout: Duration::from_secs(30),
@@ -427,12 +441,13 @@ async fn failing_invariant_with_retries_returns_failed_can_retry() {
         false,
     );
 
+    let isolation = harness.isolation();
     let result = run_agent_lifecycle(
         pool,
         &task,
         "lifecycle-fail-plan",
         &mock,
-        &harness.worktree_manager(),
+        isolation.as_ref(),
         &test_token_config(),
         &LifecycleConfig {
             timeout: Duration::from_secs(30),
@@ -464,12 +479,13 @@ async fn failing_invariant_no_retries_returns_failed_no_retry() {
         false,
     );
 
+    let isolation = harness.isolation();
     let result = run_agent_lifecycle(
         pool,
         &task,
         "lifecycle-fail-plan",
         &mock,
-        &harness.worktree_manager(),
+        isolation.as_ref(),
         &test_token_config(),
         &LifecycleConfig {
             timeout: Duration::from_secs(30),
@@ -492,12 +508,13 @@ async fn timeout_returns_timed_out() {
 
     let mock = MockHarness::hanging();
 
+    let isolation = harness.isolation();
     let result = run_agent_lifecycle(
         pool,
         &task,
         "lifecycle-plan",
         &mock,
-        &harness.worktree_manager(),
+        isolation.as_ref(),
         &test_token_config(),
         &LifecycleConfig {
             timeout: Duration::from_millis(100),
@@ -544,12 +561,13 @@ async fn events_persisted_to_db() {
         false,
     );
 
+    let isolation = harness.isolation();
     let _result = run_agent_lifecycle(
         pool,
         &task,
         "lifecycle-plan",
         &mock,
-        &harness.worktree_manager(),
+        isolation.as_ref(),
         &test_token_config(),
         &LifecycleConfig {
             timeout: Duration::from_secs(30),

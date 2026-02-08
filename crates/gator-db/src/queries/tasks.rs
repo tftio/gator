@@ -12,6 +12,7 @@ use crate::models::{Task, TaskStatus};
 ///
 /// `scope_level` and `gate_policy` are passed as strings that must match the
 /// CHECK constraints on the `tasks` table (e.g. "narrow", "auto").
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_task(
     pool: &PgPool,
     plan_id: Uuid,
@@ -20,10 +21,11 @@ pub async fn insert_task(
     scope_level: &str,
     gate_policy: &str,
     retry_max: i32,
+    requested_harness: Option<&str>,
 ) -> Result<Task> {
     let task = sqlx::query_as::<_, Task>(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max) \
-         VALUES ($1, $2, $3, $4, $5, $6) \
+        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          RETURNING *",
     )
     .bind(plan_id)
@@ -32,6 +34,7 @@ pub async fn insert_task(
     .bind(scope_level)
     .bind(gate_policy)
     .bind(retry_max)
+    .bind(requested_harness)
     .fetch_one(pool)
     .await
     .context("failed to insert task")?;
@@ -394,6 +397,7 @@ pub struct TaskWithPlanName {
     pub retry_max: i32,
     pub status: TaskStatus,
     pub assigned_harness: Option<String>,
+    pub requested_harness: Option<String>,
     pub worktree_path: Option<String>,
     pub attempt: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -407,7 +411,8 @@ pub struct TaskWithPlanName {
 pub async fn list_checking_tasks(pool: &PgPool) -> Result<Vec<TaskWithPlanName>> {
     let tasks = sqlx::query_as::<_, TaskWithPlanName>(
         "SELECT t.id, t.plan_id, t.name, t.description, t.scope_level, t.gate_policy, \
-                t.retry_max, t.status, t.assigned_harness, t.worktree_path, t.attempt, \
+                t.retry_max, t.status, t.assigned_harness, t.requested_harness, \
+                t.worktree_path, t.attempt, \
                 t.created_at, t.started_at, t.completed_at, \
                 p.name AS plan_name \
          FROM tasks t \

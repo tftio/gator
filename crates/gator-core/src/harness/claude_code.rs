@@ -269,7 +269,21 @@ impl Harness for ClaudeCodeAdapter {
                 .join("\n"),
         );
 
-        let mut cmd = Command::new(&self.claude_binary_path);
+        // If a container ID is provided, prefix the command with `docker exec -i`.
+        let container_id = task.env_vars.get("GATOR_CONTAINER_ID");
+
+        let mut cmd = if let Some(cid) = container_id {
+            let mut c = Command::new("docker");
+            c.arg("exec")
+                .arg("-i")
+                .arg("-w")
+                .arg(task.working_dir.to_string_lossy().as_ref())
+                .arg(cid)
+                .arg(&self.claude_binary_path);
+            c
+        } else {
+            Command::new(&self.claude_binary_path)
+        };
 
         cmd.arg("-p")
             .arg("--output-format")
@@ -280,8 +294,10 @@ impl Harness for ClaudeCodeAdapter {
             .arg("--append-system-prompt")
             .arg(&system_instructions);
 
-        // Working directory.
-        cmd.current_dir(&task.working_dir);
+        // Working directory (for non-container mode).
+        if container_id.is_none() {
+            cmd.current_dir(&task.working_dir);
+        }
 
         // Environment variables (merge, don't replace the entire env).
         for (key, value) in &task.env_vars {

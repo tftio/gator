@@ -35,14 +35,16 @@ pub async fn create_plan_from_toml(
 
     // 1. Insert the plan row.
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch, token_budget) \
-         VALUES ($1, $2, $3, $4) \
+        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation) \
+         VALUES ($1, $2, $3, $4, $5, $6) \
          RETURNING *",
     )
     .bind(&plan_toml.plan.name)
     .bind(project_path)
     .bind(&plan_toml.plan.base_branch)
     .bind(plan_toml.plan.token_budget)
+    .bind(&plan_toml.plan.default_harness)
+    .bind(&plan_toml.plan.isolation)
     .fetch_one(&mut *tx)
     .await
     .context("failed to insert plan")?;
@@ -52,8 +54,8 @@ pub async fn create_plan_from_toml(
 
     for task_toml in &plan_toml.tasks {
         let task = sqlx::query_as::<_, Task>(
-            "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max) \
-             VALUES ($1, $2, $3, $4, $5, $6) \
+            "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
              RETURNING *",
         )
         .bind(plan.id)
@@ -62,6 +64,7 @@ pub async fn create_plan_from_toml(
         .bind(&task_toml.scope)
         .bind(&task_toml.gate)
         .bind(task_toml.retry_max)
+        .bind(&task_toml.harness)
         .fetch_one(&mut *tx)
         .await
         .with_context(|| format!("failed to insert task {:?}", task_toml.name))?;

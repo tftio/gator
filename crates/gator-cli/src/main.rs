@@ -7,6 +7,7 @@ mod invariant_cmds;
 mod log_cmd;
 mod merge_cmd;
 mod plan_cmds;
+mod pr_cmd;
 mod report_cmd;
 mod status_cmd;
 mod tui;
@@ -120,6 +121,17 @@ pub enum Commands {
         /// Show what would be merged without doing it
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Create a GitHub PR from a completed plan
+    Pr {
+        /// Plan ID to create PR for
+        plan_id: String,
+        /// Create as a draft PR
+        #[arg(long)]
+        draft: bool,
+        /// Override the base branch
+        #[arg(long)]
+        base: Option<String>,
     },
     /// Launch interactive TUI dashboard
     Dashboard,
@@ -417,6 +429,18 @@ async fn main() -> anyhow::Result<()> {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
             let db_pool = pool::create_pool(&resolved.db_config).await?;
             let result = merge_cmd::run_merge(&db_pool, &plan_id, dry_run).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Pr {
+            plan_id,
+            draft,
+            base,
+        } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let options = pr_cmd::PrOptions { draft, base };
+            let result = pr_cmd::run_pr(&db_pool, &plan_id, &options).await;
             db_pool.close().await;
             result?;
         }

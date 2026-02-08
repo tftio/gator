@@ -111,7 +111,7 @@ async fn create_test_task(
     name: &str,
     retry_max: i32,
 ) -> gator_db::models::Task {
-    db::insert_task(pool, plan_id, name, "test description", "narrow", "auto", retry_max)
+    db::insert_task(pool, plan_id, name, "test description", "narrow", "auto", retry_max, None)
         .await
         .expect("failed to insert test task")
 }

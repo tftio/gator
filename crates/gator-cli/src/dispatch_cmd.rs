@@ -8,9 +8,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_core::harness::{ClaudeCodeAdapter, HarnessRegistry};
+use gator_core::isolation;
 use gator_core::orchestrator::{run_orchestrator, OrchestratorConfig, OrchestratorResult};
 use gator_core::token::TokenConfig;
-use gator_core::worktree::WorktreeManager;
 use gator_db::queries::plans as plan_db;
 
 /// Run the dispatch command.
@@ -39,9 +39,11 @@ pub async fn run_dispatch(
     registry.register(ClaudeCodeAdapter::new());
     let registry = Arc::new(registry);
 
-    // Set up worktree manager.
-    let worktree_manager = WorktreeManager::new(&plan.project_path, None)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Set up isolation backend based on plan configuration.
+    let isolation = isolation::create_isolation(
+        &plan.isolation,
+        std::path::Path::new(&plan.project_path),
+    )?;
 
     // Build config.
     let config = OrchestratorConfig {
@@ -54,7 +56,7 @@ pub async fn run_dispatch(
         pool,
         plan_id,
         &registry,
-        &worktree_manager,
+        &isolation,
         token_config,
         &config,
     )

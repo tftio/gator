@@ -95,7 +95,7 @@ async fn drop_temp_db(db_name: &str) {
 
 /// Create a plan + task + invariant, returning (task_id, invariant_id).
 async fn create_test_fixtures(pool: &PgPool) -> (Uuid, Uuid) {
-    let plan = plan_db::insert_plan(pool, "retry-plan", "/tmp/test", "main", None)
+    let plan = plan_db::insert_plan(pool, "retry-plan", "/tmp/test", "main", None, "claude-code", "worktree")
         .await
         .expect("insert plan");
 
@@ -107,6 +107,7 @@ async fn create_test_fixtures(pool: &PgPool) -> (Uuid, Uuid) {
         "narrow",
         "auto",
         3,
+        None,
     )
     .await
     .expect("insert task");

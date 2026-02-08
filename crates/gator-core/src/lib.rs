@@ -8,3 +8,4 @@ pub mod gate;
 pub mod state;
 pub mod lifecycle;
 pub mod orchestrator;
+pub mod isolation;

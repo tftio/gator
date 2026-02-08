@@ -14,16 +14,20 @@ pub async fn insert_plan(
     project_path: &str,
     base_branch: &str,
     token_budget: Option<i64>,
+    default_harness: &str,
+    isolation: &str,
 ) -> Result<Plan> {
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch, token_budget) \
-         VALUES ($1, $2, $3, $4) \
+        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation) \
+         VALUES ($1, $2, $3, $4, $5, $6) \
          RETURNING *",
     )
     .bind(name)
     .bind(project_path)
     .bind(base_branch)
     .bind(token_budget)
+    .bind(default_harness)
+    .bind(isolation)
     .fetch_one(pool)
     .await
     .context("failed to insert plan")?;

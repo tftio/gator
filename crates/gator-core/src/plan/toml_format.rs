@@ -25,6 +25,12 @@ pub struct PlanMeta {
     /// Optional total token budget (input + output). NULL means unlimited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_budget: Option<i64>,
+    /// Default harness to use for tasks that don't specify one.
+    #[serde(default = "default_harness_name")]
+    pub default_harness: String,
+    /// Isolation mode: "worktree" or "container".
+    #[serde(default = "default_isolation")]
+    pub isolation: String,
 }
 
 /// A single `[[tasks]]` entry in the plan TOML.
@@ -47,10 +53,21 @@ pub struct TaskToml {
     /// Names of invariants to link to this task.
     #[serde(default)]
     pub invariants: Vec<String>,
+    /// Override harness for this task (uses plan default_harness if not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }
 
 fn default_retry_max() -> i32 {
     3
+}
+
+fn default_harness_name() -> String {
+    "claude-code".to_string()
+}
+
+fn default_isolation() -> String {
+    "worktree".to_string()
 }
 
 #[cfg(test)]
@@ -158,6 +175,8 @@ gate = "auto"
                 name: "Roundtrip test".to_owned(),
                 base_branch: "develop".to_owned(),
                 token_budget: None,
+                default_harness: "claude-code".to_owned(),
+                isolation: "worktree".to_owned(),
             },
             tasks: vec![TaskToml {
                 name: "t1".to_owned(),
@@ -167,11 +186,59 @@ gate = "auto"
                 retry_max: 2,
                 depends_on: vec![],
                 invariants: vec!["check".to_owned()],
+                harness: None,
             }],
         };
 
         let serialized = toml::to_string(&plan).expect("should serialize");
         let deserialized: PlanToml = toml::from_str(&serialized).expect("should deserialize");
         assert_eq!(plan, deserialized);
+    }
+
+    #[test]
+    fn deserialize_plan_with_harness_config() {
+        let toml_str = r#"
+[plan]
+name = "Multi-harness plan"
+base_branch = "main"
+default_harness = "codex-cli"
+isolation = "container"
+
+[[tasks]]
+name = "task-default"
+description = "Uses plan default"
+scope = "narrow"
+gate = "auto"
+
+[[tasks]]
+name = "task-override"
+description = "Uses specific harness"
+scope = "medium"
+gate = "human_review"
+harness = "claude-code"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.default_harness, "codex-cli");
+        assert_eq!(plan.plan.isolation, "container");
+        assert_eq!(plan.tasks[0].harness, None);
+        assert_eq!(plan.tasks[1].harness, Some("claude-code".to_owned()));
+    }
+
+    #[test]
+    fn deserialize_plan_defaults_harness_and_isolation() {
+        let toml_str = r#"
+[plan]
+name = "Defaults plan"
+base_branch = "main"
+
+[[tasks]]
+name = "task-one"
+description = "Do something"
+scope = "narrow"
+gate = "auto"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.default_harness, "claude-code");
+        assert_eq!(plan.plan.isolation, "worktree");
     }
 }

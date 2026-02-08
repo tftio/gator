@@ -98,6 +98,8 @@ async fn create_test_task(pool: &PgPool) -> Uuid {
         "/tmp/test",
         "main",
         None,
+        "claude-code",
+        "worktree",
     )
     .await
     .expect("insert plan");
@@ -110,6 +112,7 @@ async fn create_test_task(pool: &PgPool) -> Uuid {
         "narrow",
         "auto",
         3,
+        None,
     )
     .await
     .expect("insert task");

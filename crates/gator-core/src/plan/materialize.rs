@@ -35,6 +35,8 @@ pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
     out.push_str("[plan]\n");
     out.push_str(&format!("name = {}\n", toml_quote(&plan.name)));
     out.push_str(&format!("base_branch = {}\n", toml_quote(&plan.base_branch)));
+    out.push_str(&format!("default_harness = {}\n", toml_quote(&plan.default_harness)));
+    out.push_str(&format!("isolation = {}\n", toml_quote(&plan.isolation)));
 
     for task in &tasks {
         out.push('\n');
@@ -47,6 +49,9 @@ pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
         out.push_str(&format!("scope = {}\n", toml_quote(&task.scope_level.to_string())));
         out.push_str(&format!("gate = {}\n", toml_quote(&task.gate_policy.to_string())));
         out.push_str(&format!("retry_max = {}\n", task.retry_max));
+        if let Some(ref harness) = task.requested_harness {
+            out.push_str(&format!("harness = {}\n", toml_quote(harness)));
+        }
         out.push_str(&format!("status = {}\n", toml_quote(&task.status.to_string())));
 
         // Dependencies.
