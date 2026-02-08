@@ -13,15 +13,17 @@ pub async fn insert_plan(
     name: &str,
     project_path: &str,
     base_branch: &str,
+    token_budget: Option<i64>,
 ) -> Result<Plan> {
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ($1, $2, $3) \
+        "INSERT INTO plans (name, project_path, base_branch, token_budget) \
+         VALUES ($1, $2, $3, $4) \
          RETURNING *",
     )
     .bind(name)
     .bind(project_path)
     .bind(base_branch)
+    .bind(token_budget)
     .fetch_one(pool)
     .await
     .context("failed to insert plan")?;
@@ -51,13 +53,23 @@ pub async fn list_plans(pool: &PgPool) -> Result<Vec<Plan>> {
 }
 
 /// Update the status of a plan.
+///
+/// Conditionally sets timestamps:
+/// - `approved_at` when transitioning to `approved` (if not already set)
+/// - `completed_at` when transitioning to `completed` or `failed` (if not already set)
 pub async fn update_plan_status(pool: &PgPool, id: Uuid, status: PlanStatus) -> Result<()> {
-    let result = sqlx::query("UPDATE plans SET status = $1 WHERE id = $2")
-        .bind(status)
-        .bind(id)
-        .execute(pool)
-        .await
-        .context("failed to update plan status")?;
+    let result = sqlx::query(
+        "UPDATE plans SET \
+           status = $1, \
+           approved_at = CASE WHEN $1 = 'approved' THEN COALESCE(approved_at, NOW()) ELSE approved_at END, \
+           completed_at = CASE WHEN $1 IN ('completed', 'failed') THEN COALESCE(completed_at, NOW()) ELSE completed_at END \
+         WHERE id = $2",
+    )
+    .bind(status)
+    .bind(id)
+    .execute(pool)
+    .await
+    .context("failed to update plan status")?;
 
     if result.rows_affected() == 0 {
         anyhow::bail!("plan {id} not found");

@@ -22,13 +22,14 @@ use gator_db::queries::tasks as db;
 /// Enforces the valid transition graph:
 ///
 /// ```text
-/// pending  -> assigned
-/// assigned -> running
-/// running  -> checking
-/// checking -> passed
-/// checking -> failed
-/// failed   -> assigned  (retry)
-/// failed   -> escalated
+/// pending   -> assigned
+/// assigned  -> running
+/// running   -> checking
+/// checking  -> passed
+/// checking  -> failed
+/// failed    -> assigned  (retry)
+/// failed    -> escalated
+/// escalated -> pending   (operator retry override)
 /// ```
 pub struct TaskStateMachine;
 
@@ -45,6 +46,7 @@ impl TaskStateMachine {
                 | (TaskStatus::Checking, TaskStatus::Failed)
                 | (TaskStatus::Failed, TaskStatus::Assigned)
                 | (TaskStatus::Failed, TaskStatus::Escalated)
+                | (TaskStatus::Escalated, TaskStatus::Pending)
         )
     }
 

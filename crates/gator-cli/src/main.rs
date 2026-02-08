@@ -1,11 +1,17 @@
 mod agent;
+mod cleanup_cmd;
 mod config;
 mod dispatch_cmd;
+mod gate_cmd;
 mod invariant_cmds;
 mod log_cmd;
+mod merge_cmd;
 mod plan_cmds;
+mod report_cmd;
 mod status_cmd;
+mod tui;
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 
 use gator_core::token::guard;
@@ -58,10 +64,10 @@ pub enum Commands {
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
     },
-    /// Show plan status and task progress
+    /// Show plan status and task progress (omit plan_id to list all plans)
     Status {
-        /// Plan ID to show status for
-        plan_id: String,
+        /// Plan ID to show status for (omit to list all plans)
+        plan_id: Option<String>,
     },
     /// Show agent event log for a task
     Log {
@@ -71,6 +77,52 @@ pub enum Commands {
         #[arg(long)]
         attempt: Option<i32>,
     },
+    /// Approve a task awaiting human review
+    Approve {
+        /// Task ID to approve
+        task_id: String,
+    },
+    /// Reject a task awaiting human review (sends to failed for retry/escalation)
+    Reject {
+        /// Task ID to reject
+        task_id: String,
+    },
+    /// Retry a failed or escalated task
+    Retry {
+        /// Task ID to retry
+        task_id: String,
+        /// Override retry_max limit
+        #[arg(long)]
+        force: bool,
+    },
+    /// View gate results for a task
+    Gate {
+        /// Task ID to view gate results for
+        task_id: String,
+    },
+    /// Show token usage and duration report for a plan
+    Report {
+        /// Plan ID to report on
+        plan_id: String,
+    },
+    /// Remove worktrees for completed tasks in a plan
+    Cleanup {
+        /// Plan ID to clean up
+        plan_id: String,
+        /// Remove worktrees for all tasks (not just passed)
+        #[arg(long)]
+        all: bool,
+    },
+    /// Merge passed task branches into the base branch
+    Merge {
+        /// Plan ID to merge
+        plan_id: String,
+        /// Show what would be merged without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Launch interactive TUI dashboard
+    Dashboard,
     /// Read your assigned task (agent mode)
     Task,
     /// Run invariants for your task (agent mode)
@@ -298,7 +350,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status { plan_id } => {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
             let db_pool = pool::create_pool(&resolved.db_config).await?;
-            let result = status_cmd::run_status(&db_pool, &plan_id).await;
+            let result = status_cmd::run_status(&db_pool, plan_id.as_deref()).await;
             db_pool.close().await;
             result?;
         }
@@ -306,6 +358,72 @@ async fn main() -> anyhow::Result<()> {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
             let db_pool = pool::create_pool(&resolved.db_config).await?;
             let result = log_cmd::run_log(&db_pool, &task_id, attempt).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Approve { task_id } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let id = uuid::Uuid::parse_str(&task_id)
+                .with_context(|| format!("invalid task ID: {task_id}"))?;
+            let result = gator_core::state::dispatch::approve_task(&db_pool, id).await;
+            db_pool.close().await;
+            result?;
+            println!("Task {task_id} approved.");
+        }
+        Commands::Reject { task_id } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let id = uuid::Uuid::parse_str(&task_id)
+                .with_context(|| format!("invalid task ID: {task_id}"))?;
+            let result = gator_core::state::dispatch::reject_task(&db_pool, id).await;
+            db_pool.close().await;
+            result?;
+            println!("Task {task_id} rejected.");
+        }
+        Commands::Retry { task_id, force } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let id = uuid::Uuid::parse_str(&task_id)
+                .with_context(|| format!("invalid task ID: {task_id}"))?;
+            let result =
+                gator_core::state::dispatch::operator_retry_task(&db_pool, id, force).await;
+            db_pool.close().await;
+            result?;
+            println!("Task {task_id} reset to pending for retry.");
+        }
+        Commands::Gate { task_id } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = gate_cmd::run_gate(&db_pool, &task_id).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Report { plan_id } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = report_cmd::run_report(&db_pool, &plan_id).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Cleanup { plan_id, all } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = cleanup_cmd::run_cleanup(&db_pool, &plan_id, all).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Merge { plan_id, dry_run } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = merge_cmd::run_merge(&db_pool, &plan_id, dry_run).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Dashboard => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = tui::run_dashboard(db_pool.clone()).await;
             db_pool.close().await;
             result?;
         }

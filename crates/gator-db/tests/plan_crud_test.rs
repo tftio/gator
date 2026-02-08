@@ -90,7 +90,7 @@ async fn drop_temp_db(db_name: &str) {
 async fn insert_and_get_plan() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "test-plan", "/tmp/project", "main")
+    let plan = plans::insert_plan(&pool, "test-plan", "/tmp/project", "main", None)
         .await
         .expect("insert_plan should succeed");
 
@@ -132,10 +132,10 @@ async fn get_plan_returns_none_for_missing_id() {
 async fn list_plans_returns_all() {
     let (pool, db_name) = create_temp_db().await;
 
-    plans::insert_plan(&pool, "plan-a", "/tmp/a", "main")
+    plans::insert_plan(&pool, "plan-a", "/tmp/a", "main", None)
         .await
         .unwrap();
-    plans::insert_plan(&pool, "plan-b", "/tmp/b", "develop")
+    plans::insert_plan(&pool, "plan-b", "/tmp/b", "develop", None)
         .await
         .unwrap();
 
@@ -150,7 +150,7 @@ async fn list_plans_returns_all() {
 async fn update_plan_status_succeeds() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "status-test", "/tmp", "main")
+    let plan = plans::insert_plan(&pool, "status-test", "/tmp", "main", None)
         .await
         .unwrap();
 
@@ -186,7 +186,7 @@ async fn update_plan_status_fails_for_missing_plan() {
 async fn insert_and_get_task() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "task-test-plan", "/tmp", "main")
+    let plan = plans::insert_plan(&pool, "task-test-plan", "/tmp", "main", None)
         .await
         .unwrap();
 
@@ -226,10 +226,10 @@ async fn insert_and_get_task() {
 async fn list_tasks_for_plan_returns_correct_tasks() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan_a = plans::insert_plan(&pool, "plan-a", "/tmp/a", "main")
+    let plan_a = plans::insert_plan(&pool, "plan-a", "/tmp/a", "main", None)
         .await
         .unwrap();
-    let plan_b = plans::insert_plan(&pool, "plan-b", "/tmp/b", "main")
+    let plan_b = plans::insert_plan(&pool, "plan-b", "/tmp/b", "main", None)
         .await
         .unwrap();
 
@@ -257,7 +257,7 @@ async fn list_tasks_for_plan_returns_correct_tasks() {
 async fn update_task_status_succeeds() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "p", "/tmp", "main").await.unwrap();
+    let plan = plans::insert_plan(&pool, "p", "/tmp", "main", None).await.unwrap();
     let task = tasks::insert_task(&pool, plan.id, "t", "d", "narrow", "auto", 3)
         .await
         .unwrap();
@@ -277,7 +277,7 @@ async fn update_task_status_succeeds() {
 async fn task_dependencies_roundtrip() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "dep-test", "/tmp", "main")
+    let plan = plans::insert_plan(&pool, "dep-test", "/tmp", "main", None)
         .await
         .unwrap();
 
@@ -322,7 +322,7 @@ async fn task_dependencies_roundtrip() {
 async fn task_dependency_is_idempotent() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "idem", "/tmp", "main").await.unwrap();
+    let plan = plans::insert_plan(&pool, "idem", "/tmp", "main", None).await.unwrap();
     let a = tasks::insert_task(&pool, plan.id, "a", "d", "narrow", "auto", 3)
         .await
         .unwrap();
@@ -345,7 +345,7 @@ async fn task_dependency_is_idempotent() {
 async fn link_task_invariant_roundtrip() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "inv-link", "/tmp", "main")
+    let plan = plans::insert_plan(&pool, "inv-link", "/tmp", "main", None)
         .await
         .unwrap();
     let task = tasks::insert_task(&pool, plan.id, "t", "d", "narrow", "auto", 3)
@@ -392,6 +392,140 @@ async fn link_task_invariant_roundtrip() {
     .unwrap();
 
     assert_eq!(linked2.0, 1);
+
+    pool.close().await;
+    drop_temp_db(&db_name).await;
+}
+
+// -----------------------------------------------------------------------
+// Plan timestamp tests (T023)
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn update_plan_status_to_completed_sets_completed_at() {
+    let (pool, db_name) = create_temp_db().await;
+
+    let plan = plans::insert_plan(&pool, "ts-completed", "/tmp", "main", None)
+        .await
+        .unwrap();
+
+    assert!(plan.completed_at.is_none());
+
+    plans::update_plan_status(&pool, plan.id, PlanStatus::Completed)
+        .await
+        .unwrap();
+
+    let updated = plans::get_plan(&pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(updated.status, PlanStatus::Completed);
+    assert!(
+        updated.completed_at.is_some(),
+        "completed_at should be set when transitioning to completed"
+    );
+
+    pool.close().await;
+    drop_temp_db(&db_name).await;
+}
+
+#[tokio::test]
+async fn update_plan_status_to_failed_sets_completed_at() {
+    let (pool, db_name) = create_temp_db().await;
+
+    let plan = plans::insert_plan(&pool, "ts-failed", "/tmp", "main", None)
+        .await
+        .unwrap();
+
+    plans::update_plan_status(&pool, plan.id, PlanStatus::Failed)
+        .await
+        .unwrap();
+
+    let updated = plans::get_plan(&pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(updated.status, PlanStatus::Failed);
+    assert!(
+        updated.completed_at.is_some(),
+        "completed_at should be set when transitioning to failed"
+    );
+
+    pool.close().await;
+    drop_temp_db(&db_name).await;
+}
+
+#[tokio::test]
+async fn update_plan_status_to_approved_sets_approved_at() {
+    let (pool, db_name) = create_temp_db().await;
+
+    let plan = plans::insert_plan(&pool, "ts-approved", "/tmp", "main", None)
+        .await
+        .unwrap();
+
+    assert!(plan.approved_at.is_none());
+
+    plans::update_plan_status(&pool, plan.id, PlanStatus::Approved)
+        .await
+        .unwrap();
+
+    let updated = plans::get_plan(&pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(updated.status, PlanStatus::Approved);
+    assert!(
+        updated.approved_at.is_some(),
+        "approved_at should be set when transitioning to approved"
+    );
+
+    pool.close().await;
+    drop_temp_db(&db_name).await;
+}
+
+#[tokio::test]
+async fn update_plan_status_does_not_overwrite_existing_timestamps() {
+    let (pool, db_name) = create_temp_db().await;
+
+    // Use approve_plan to set approved_at via the explicit path.
+    let plan = plans::insert_plan(&pool, "ts-no-overwrite", "/tmp", "main", None)
+        .await
+        .unwrap();
+    let approved = plans::approve_plan(&pool, plan.id).await.unwrap();
+    let original_approved_at = approved.approved_at.unwrap();
+
+    // Transition to running then back to approved via update_plan_status.
+    plans::update_plan_status(&pool, plan.id, PlanStatus::Running)
+        .await
+        .unwrap();
+    plans::update_plan_status(&pool, plan.id, PlanStatus::Approved)
+        .await
+        .unwrap();
+
+    let updated = plans::get_plan(&pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(
+        updated.approved_at.unwrap(),
+        original_approved_at,
+        "approved_at should not be overwritten"
+    );
+
+    pool.close().await;
+    drop_temp_db(&db_name).await;
+}
+
+#[tokio::test]
+async fn update_plan_status_to_running_does_not_set_timestamps() {
+    let (pool, db_name) = create_temp_db().await;
+
+    let plan = plans::insert_plan(&pool, "ts-running", "/tmp", "main", None)
+        .await
+        .unwrap();
+
+    plans::update_plan_status(&pool, plan.id, PlanStatus::Running)
+        .await
+        .unwrap();
+
+    let updated = plans::get_plan(&pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(updated.status, PlanStatus::Running);
+    assert!(
+        updated.approved_at.is_none(),
+        "approved_at should not be set for running"
+    );
+    assert!(
+        updated.completed_at.is_none(),
+        "completed_at should not be set for running"
+    );
 
     pool.close().await;
     drop_temp_db(&db_name).await;

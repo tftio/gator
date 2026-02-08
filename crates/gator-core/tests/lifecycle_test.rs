@@ -266,6 +266,7 @@ async fn setup_passing_task(pool: &PgPool, repo_path: &Path) -> (Uuid, gator_db:
         "lifecycle-plan",
         &repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .expect("insert plan");
@@ -321,6 +322,7 @@ async fn setup_failing_task(
         "lifecycle-fail-plan",
         &repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .expect("insert plan");

@@ -7,22 +7,22 @@
 
 | ID | Name | Status | Depends On |
 |----|------|--------|------------|
-| T001 | Cargo workspace scaffold | [ ] | -- |
-| T002 | Database schema and migrations | [ ] | T001 |
-| T003 | gator init + connection pool | [ ] | T002 |
-| T004 | Plan types, TOML parser, DB CRUD | [ ] | T003 |
-| T005 | Plan CLI commands (create, show) | [ ] | T004 |
-| T006 | Invariant types + DB CRUD | [ ] | T003 |
-| T007 | Invariant CLI commands (add, list, test) | [ ] | T004, T006 |
-| T008 | Plan materialization (DB -> TOML) | [ ] | T005 |
-| T009 | Git worktree management | [ ] | T001 |
-| T010 | Scoped token generation + validation | [ ] | T001 |
-| T011 | Harness trait + AgentHandle | [ ] | T001 |
-| T012 | ClaudeCodeAdapter | [ ] | T011 |
-| T013 | Agent-mode CLI | [ ] | T010, T012 |
-| T014 | Task state machine transitions | [ ] | T003, T009, T010, T011 |
-| T015 | Gate runner | [ ] | T014 |
-| T016 | End-to-end integration test | [ ] | T013, T015 |
+| T001 | Cargo workspace scaffold | [x] | -- |
+| T002 | Database schema and migrations | [x] | T001 |
+| T003 | gator init + connection pool | [x] | T002 |
+| T004 | Plan types, TOML parser, DB CRUD | [x] | T003 |
+| T005 | Plan CLI commands (create, show) | [x] | T004 |
+| T006 | Invariant types + DB CRUD | [x] | T003 |
+| T007 | Invariant CLI commands (add, list, test) | [x] | T004, T006 |
+| T008 | Plan materialization (DB -> TOML) | [x] | T005 |
+| T009 | Git worktree management | [x] | T001 |
+| T010 | Scoped token generation + validation | [x] | T001 |
+| T011 | Harness trait + AgentHandle | [x] | T001 |
+| T012 | ClaudeCodeAdapter | [x] | T011 |
+| T013 | Agent-mode CLI | [x] | T010, T012 |
+| T014 | Task state machine transitions | [x] | T003, T009, T010, T011 |
+| T015 | Gate runner | [x] | T014 |
+| T016 | End-to-end integration test | [x] | T013, T015 |
 
 ---
 
@@ -129,11 +129,11 @@
 5. Verify: `cargo build` succeeds. `cargo clippy` has no warnings. `cargo test` passes (no tests yet, but compilation is clean).
 
 **Completion gates**:
-- [ ] `cargo build --workspace` succeeds with no errors
-- [ ] `cargo clippy --workspace -- -D warnings` passes
-- [ ] Workspace has three crates: gator-db, gator-core, gator-cli
-- [ ] `gator-cli` binary runs and shows help text
-- [ ] `.gitignore` is present and correct
+- [x] `cargo build --workspace` succeeds with no errors
+- [x] `cargo clippy --workspace -- -D warnings` passes
+- [x] Workspace has three crates: gator-db, gator-core, gator-cli
+- [x] `gator-cli` binary runs and shows help text
+- [x] `.gitignore` is present and correct
 
 ---
 
@@ -266,11 +266,11 @@
 6. Verify: `cargo build --workspace` succeeds. Types compile. Migration SQL is syntactically valid (will be tested against real DB in T003).
 
 **Completion gates**:
-- [ ] Migration file exists at `crates/gator-db/migrations/001_initial_schema.sql`
-- [ ] All model types compile with correct derives
-- [ ] Enum types implement `Display` and `FromStr`
-- [ ] `cargo build --workspace` succeeds
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] Migration file exists at `crates/gator-db/migrations/001_initial_schema.sql`
+- [x] All model types compile with correct derives
+- [x] Enum types implement `Display` and `FromStr`
+- [x] `cargo build --workspace` succeeds
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -312,11 +312,11 @@
 6. Document in README.md (create if needed): prerequisites (Postgres 18, Rust 1.85+), setup steps.
 
 **Completion gates**:
-- [ ] `gator init` successfully creates database and runs migrations against a local Postgres 18 instance
-- [ ] Running `gator init` twice is idempotent (no errors on second run)
-- [ ] Integration tests pass: `cargo test --workspace`
-- [ ] `cargo clippy --workspace -- -D warnings` passes
-- [ ] Connection pool creates and destroys cleanly
+- [x] `gator init` successfully creates database and runs migrations against a local Postgres 18 instance
+- [x] Running `gator init` twice is idempotent (no errors on second run)
+- [x] Integration tests pass: `cargo test --workspace`
+- [x] `cargo clippy --workspace -- -D warnings` passes
+- [x] Connection pool creates and destroys cleanly
 
 ---
 
@@ -391,12 +391,12 @@
 6. Write unit tests for TOML parsing (valid/invalid inputs, cycle detection) and integration tests for DB CRUD.
 
 **Completion gates**:
-- [ ] `parse_plan_toml` correctly parses the defined TOML format
-- [ ] Cycle detection rejects plans with circular dependencies
-- [ ] `create_plan_from_toml` inserts plan + tasks + dependencies in a single transaction
-- [ ] DB queries round-trip correctly (insert then read back)
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `parse_plan_toml` correctly parses the defined TOML format
+- [x] Cycle detection rejects plans with circular dependencies
+- [x] `create_plan_from_toml` inserts plan + tasks + dependencies in a single transaction
+- [x] DB queries round-trip correctly (insert then read back)
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -435,13 +435,13 @@
    - Approve the plan
 
 **Completion gates**:
-- [ ] `gator plan create test.toml` successfully creates a plan and prints its ID
-- [ ] `gator plan show` lists all plans
-- [ ] `gator plan show <id>` shows detailed plan with tasks, dependencies, invariants
-- [ ] `gator plan approve <id>` transitions status to approved
-- [ ] Error cases handled: file not found, invalid TOML, cycle detected
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `gator plan create test.toml` successfully creates a plan and prints its ID
+- [x] `gator plan show` lists all plans
+- [x] `gator plan show <id>` shows detailed plan with tasks, dependencies, invariants
+- [x] `gator plan approve <id>` transitions status to approved
+- [x] Error cases handled: file not found, invalid TOML, cycle detected
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -477,13 +477,13 @@
    - Integration tests for invariant DB CRUD
 
 **Completion gates**:
-- [ ] Invariant CRUD operations work correctly against Postgres
-- [ ] `run_invariant` executes a command and captures output
-- [ ] `run_invariant` correctly reports pass/fail based on exit code
-- [ ] Unique name constraint enforced
-- [ ] Cannot delete invariant linked to tasks
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] Invariant CRUD operations work correctly against Postgres
+- [x] `run_invariant` executes a command and captures output
+- [x] `run_invariant` correctly reports pass/fail based on exit code
+- [x] Unique name constraint enforced
+- [x] Cannot delete invariant linked to tasks
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -522,12 +522,12 @@
 4. Write CLI integration tests.
 
 **Completion gates**:
-- [ ] `gator invariant add` creates an invariant and prints its ID
-- [ ] `gator invariant list` shows all invariants in table format
-- [ ] `gator invariant test <name>` runs the invariant and reports pass/fail
-- [ ] Duplicate name is rejected with clear error message
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `gator invariant add` creates an invariant and prints its ID
+- [x] `gator invariant list` shows all invariants in table format
+- [x] `gator invariant test <name>` runs the invariant and reports pass/fail
+- [x] Duplicate name is rejected with clear error message
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -559,12 +559,12 @@
    - Verify: task names, descriptions, dependencies, invariant links all match
 
 **Completion gates**:
-- [ ] Round-trip test passes: parse -> DB -> materialize -> parse produces equivalent plan
-- [ ] `materialize_task` produces a clean, agent-readable markdown document
-- [ ] `gator plan export` writes valid TOML to file or stdout
-- [ ] Task status is included in materialized output
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] Round-trip test passes: parse -> DB -> materialize -> parse produces equivalent plan
+- [x] `materialize_task` produces a clean, agent-readable markdown document
+- [x] `gator plan export` writes valid TOML to file or stdout
+- [x] Task status is included in materialized output
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -604,13 +604,13 @@
    - Verify cleanup on failure
 
 **Completion gates**:
-- [ ] `create_worktree` creates an isolated worktree with correct branch
-- [ ] `remove_worktree` cleans up completely
-- [ ] `list_worktrees` returns accurate list
-- [ ] Operations are idempotent
-- [ ] Failed operations clean up after themselves
-- [ ] `cargo test --workspace` passes (tests use temp git repos)
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `create_worktree` creates an isolated worktree with correct branch
+- [x] `remove_worktree` cleans up completely
+- [x] `list_worktrees` returns accurate list
+- [x] Operations are idempotent
+- [x] Failed operations clean up after themselves
+- [x] `cargo test --workspace` passes (tests use temp git repos)
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -654,13 +654,13 @@
    - Constant-time comparison (no timing oracle)
 
 **Completion gates**:
-- [ ] `generate_token` produces correctly formatted tokens
-- [ ] `validate_token` accepts valid tokens and rejects tampered ones
-- [ ] `require_operator_mode` blocks when agent token is set
-- [ ] `require_agent_mode` blocks when no valid token is present
-- [ ] Token validation is constant-time
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `generate_token` produces correctly formatted tokens
+- [x] `validate_token` accepts valid tokens and rejects tampered ones
+- [x] `require_operator_mode` blocks when agent token is set
+- [x] `require_agent_mode` blocks when no valid token is present
+- [x] Token validation is constant-time
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -707,13 +707,13 @@
 4. Write tests: verify trait is object-safe, registry works, types serialize/deserialize correctly.
 
 **Completion gates**:
-- [ ] `Harness` trait is object-safe (can be used as `dyn Harness`)
-- [ ] `AgentEvent` variants cover all needed event types
-- [ ] `MaterializedTask` includes all fields an agent needs
-- [ ] `HarnessRegistry` registers and retrieves harnesses
-- [ ] All types implement Debug, Clone where appropriate
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `Harness` trait is object-safe (can be used as `dyn Harness`)
+- [x] `AgentEvent` variants cover all needed event types
+- [x] `MaterializedTask` includes all fields an agent needs
+- [x] `HarnessRegistry` registers and retrieves harnesses
+- [x] All types implement Debug, Clone where appropriate
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -753,13 +753,13 @@
    - Test graceful handling of malformed lines
 
 **Completion gates**:
-- [ ] `ClaudeCodeAdapter` implements `Harness` trait
-- [ ] Can spawn a subprocess and stream JSONL events
-- [ ] All `AgentEvent` variants are correctly mapped from Claude Code output
-- [ ] Graceful handling of process exit and malformed output
-- [ ] `kill` terminates the subprocess cleanly
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `ClaudeCodeAdapter` implements `Harness` trait
+- [x] Can spawn a subprocess and stream JSONL events
+- [x] All `AgentEvent` variants are correctly mapped from Claude Code output
+- [x] Graceful handling of process exit and malformed output
+- [x] `kill` terminates the subprocess cleanly
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -818,14 +818,14 @@
    - Test that invalid/tampered tokens are rejected
 
 **Completion gates**:
-- [ ] `gator task` prints task description when valid token is set
-- [ ] `gator check` runs all linked invariants and reports results
-- [ ] `gator progress` records a progress event
-- [ ] `gator done` signals completion without changing task status
-- [ ] Operator commands (plan, dispatch, etc.) are rejected in agent mode
-- [ ] Invalid tokens are rejected with clear error
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] `gator task` prints task description when valid token is set
+- [x] `gator check` runs all linked invariants and reports results
+- [x] `gator progress` records a progress event
+- [x] `gator done` signals completion without changing task status
+- [x] Operator commands (plan, dispatch, etc.) are rejected in agent mode
+- [x] Invalid tokens are rejected with clear error
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -891,14 +891,14 @@
    - Optimistic locking prevents double-transition
 
 **Completion gates**:
-- [ ] All valid state transitions work correctly
-- [ ] Invalid transitions are rejected with descriptive errors
-- [ ] Dependency checking prevents premature task assignment
-- [ ] Retry respects retry_max
-- [ ] Timestamps set correctly on transitions
-- [ ] Concurrent transitions don't corrupt state (optimistic locking)
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] All valid state transitions work correctly
+- [x] Invalid transitions are rejected with descriptive errors
+- [x] Dependency checking prevents premature task assignment
+- [x] Retry respects retry_max
+- [x] Timestamps set correctly on transitions
+- [x] Concurrent transitions don't corrupt state (optimistic locking)
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -942,13 +942,13 @@
    - Test with real shell commands (`true`, `false`)
 
 **Completion gates**:
-- [ ] Gate runs all linked invariants for a task
-- [ ] Results recorded in `gate_results` table
-- [ ] `auto` gate policy correctly passes or fails tasks
-- [ ] `human_review`/`human_approve` leaves task for human
-- [ ] Retry eligibility checked on failure
-- [ ] `cargo test --workspace` passes
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] Gate runs all linked invariants for a task
+- [x] Results recorded in `gate_results` table
+- [x] `auto` gate policy correctly passes or fails tasks
+- [x] `human_review`/`human_approve` leaves task for human
+- [x] Retry eligibility checked on failure
+- [x] `cargo test --workspace` passes
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -994,13 +994,13 @@
    - Verify retry works
 
 **Completion gates**:
-- [ ] Full happy-path test passes: init -> create plan -> approve -> dispatch -> agent commands -> gate -> passed
-- [ ] Negative test passes: invariant failure -> task failed -> retry
-- [ ] Agent-mode commands work with scoped token
-- [ ] Operator commands rejected in agent mode
-- [ ] All temp resources cleaned up
-- [ ] `cargo test --workspace` passes (including this integration test)
-- [ ] `cargo clippy --workspace -- -D warnings` passes
+- [x] Full happy-path test passes: init -> create plan -> approve -> dispatch -> agent commands -> gate -> passed
+- [x] Negative test passes: invariant failure -> task failed -> retry
+- [x] Agent-mode commands work with scoped token
+- [x] Operator commands rejected in agent mode
+- [x] All temp resources cleaned up
+- [x] `cargo test --workspace` passes (including this integration test)
+- [x] `cargo clippy --workspace -- -D warnings` passes
 
 ---
 
@@ -1010,4 +1010,19 @@ Record task completions here as they happen:
 
 | Task | Completed | Notes |
 |------|-----------|-------|
-| | | |
+| T001 | 2026-02-07 | Workspace scaffold with 3 crates |
+| T002 | 2026-02-07 | Full schema in 001_initial_schema.sql |
+| T003 | 2026-02-07 | Split into `gator init` (config) + `gator db-init` (migrations) |
+| T004 | 2026-02-07 | TOML parser with cycle detection, DB CRUD |
+| T005 | 2026-02-07 | plan create/show/approve/export commands |
+| T006 | 2026-02-07 | Invariant CRUD + runner |
+| T007 | 2026-02-07 | invariant add/list/test commands |
+| T008 | 2026-02-07 | Plan + task materialization, round-trip tested |
+| T009 | 2026-02-07 | Worktree manager with idempotent create/remove/cleanup |
+| T010 | 2026-02-07 | HMAC-SHA256 scoped tokens with constant-time validation |
+| T011 | 2026-02-07 | Harness trait, AgentHandle, AgentEvent, HarnessRegistry |
+| T012 | 2026-02-07 | ClaudeCodeAdapter with stream-json parsing |
+| T013 | 2026-02-07 | Agent-mode CLI: task/check/progress/done |
+| T014 | 2026-02-07 | State machine with optimistic locking, dependency checks |
+| T015 | 2026-02-07 | Gate runner + evaluator with auto/human policies |
+| T016 | 2026-02-07 | E2E tests: happy path, failure+retry, fleet orchestration |

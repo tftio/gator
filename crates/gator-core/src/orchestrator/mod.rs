@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, Semaphore};
 use uuid::Uuid;
 
 use gator_db::models::{PlanStatus, TaskStatus};
+use gator_db::queries::agent_events;
 use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
@@ -37,6 +38,8 @@ pub enum OrchestratorResult {
     Failed { failed_tasks: Vec<String> },
     /// One or more tasks require human review.
     HumanRequired { tasks_awaiting_review: Vec<String> },
+    /// Token budget exceeded.
+    BudgetExceeded { used: i64, budget: i64 },
 }
 
 /// Message sent from spawned lifecycle tasks back to the orchestrator loop.
@@ -155,6 +158,25 @@ pub async fn run_orchestrator(
             handle_lifecycle_result(pool, &done).await?;
         }
 
+        // 3a-bis. Budget check.
+        if let Some(budget) = plan.token_budget {
+            let (input, output) = agent_events::get_token_usage_for_plan(pool, plan_id).await?;
+            let total = input + output;
+            if total >= budget {
+                tracing::warn!(
+                    plan_id = %plan_id,
+                    used = total,
+                    budget = budget,
+                    "token budget exceeded, stopping plan"
+                );
+                plan_db::update_plan_status(pool, plan_id, PlanStatus::Failed).await?;
+                return Ok(OrchestratorResult::BudgetExceeded {
+                    used: total,
+                    budget,
+                });
+            }
+        }
+
         // 3b. Check termination conditions.
         let is_complete = task_db::is_plan_complete(pool, plan_id).await?;
         if is_complete {
@@ -184,7 +206,8 @@ pub async fn run_orchestrator(
                 .collect();
 
             if !checking.is_empty() {
-                plan_db::update_plan_status(pool, plan_id, PlanStatus::Failed).await?;
+                // Leave plan as Running so the operator can approve/reject
+                // tasks and re-run `gator dispatch` to resume.
                 return Ok(OrchestratorResult::HumanRequired {
                     tasks_awaiting_review: checking,
                 });

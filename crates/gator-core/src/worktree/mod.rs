@@ -46,6 +46,15 @@ pub enum WorktreeError {
     ParseError(String),
 }
 
+/// Result of a merge operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeResult {
+    /// Merge completed successfully.
+    Success,
+    /// Merge had conflicts and was aborted.
+    Conflict { details: String },
+}
+
 /// Information about a single git worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
@@ -358,8 +367,109 @@ impl WorktreeManager {
         Ok(())
     }
 
+    /// Merge a branch into the current branch of the main repo using `--no-ff`.
+    ///
+    /// Returns `Ok(true)` on success, `Ok(false)` if there were merge conflicts
+    /// (the merge is aborted automatically). Returns `Err` on other git failures.
+    pub fn merge_branch(&self, branch_name: &str) -> Result<MergeResult, WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let output = Command::new("git")
+            .args(["merge", "--no-ff", branch_name])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommand {
+                message: "failed to run git merge".into(),
+                source: e,
+            })?;
+
+        if output.status.success() {
+            return Ok(MergeResult::Success);
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+        // Check for merge conflict indicators.
+        if stderr.contains("CONFLICT") || stdout.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
+            // Abort the conflicted merge.
+            let _ = Command::new("git")
+                .args(["merge", "--abort"])
+                .current_dir(&self.repo_path)
+                .output();
+
+            return Ok(MergeResult::Conflict {
+                details: format!("{stdout}\n{stderr}").trim().to_string(),
+            });
+        }
+
+        Err(WorktreeError::GitExit {
+            command: "merge".into(),
+            code: output.status.code().unwrap_or(-1),
+            stderr,
+        })
+    }
+
+    /// Delete a local branch.
+    ///
+    /// Uses `-D` (force delete) since the branch may not be fully merged
+    /// into the current branch (it was merged via `--no-ff`).
+    /// Returns `Ok(())` even if the branch doesn't exist (idempotent).
+    pub fn delete_branch(&self, branch_name: &str) -> Result<(), WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let output = Command::new("git")
+            .args(["branch", "-D", branch_name])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommand {
+                message: "failed to run git branch -D".into(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            // Branch not found is not an error for idempotency.
+            if stderr.contains("not found") {
+                return Ok(());
+            }
+            return Err(WorktreeError::GitExit {
+                command: "branch -D".into(),
+                code: output.status.code().unwrap_or(-1),
+                stderr,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Checkout a branch in the main repository.
+    pub fn checkout(&self, branch_name: &str) -> Result<(), WorktreeError> {
+        let _lock = self.git_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let output = Command::new("git")
+            .args(["checkout", branch_name])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommand {
+                message: "failed to run git checkout".into(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(WorktreeError::GitExit {
+                command: "checkout".into(),
+                code: output.status.code().unwrap_or(-1),
+                stderr,
+            });
+        }
+
+        Ok(())
+    }
+
     /// Check whether a branch exists in the repository.
-    fn branch_exists(&self, branch_name: &str) -> Result<bool, WorktreeError> {
+    pub fn branch_exists(&self, branch_name: &str) -> Result<bool, WorktreeError> {
         let output = Command::new("git")
             .args(["rev-parse", "--verify"])
             .arg(format!("refs/heads/{branch_name}"))
@@ -891,5 +1001,85 @@ branch refs/heads/main";
                 "partial worktree directory should be cleaned up"
             );
         }
+    }
+
+    #[test]
+    fn test_merge_branch_success() {
+        let (_dir, repo_path) = create_temp_repo();
+        let worktree_base = TempDir::new().expect("failed to create worktree base");
+        let mgr = WorktreeManager::new(
+            &repo_path,
+            Some(worktree_base.path().to_path_buf()),
+        )
+        .unwrap();
+
+        // Create a worktree, make a commit in it, then merge back.
+        let branch = WorktreeManager::branch_name("plan", "merge-task");
+        let info = mgr.create_worktree(&branch).expect("create failed");
+
+        // Write a new file in the worktree and commit it.
+        let new_file = info.path.join("feature.txt");
+        std::fs::write(&new_file, "new feature\n").expect("write failed");
+
+        let run = |args: &[&str], dir: &std::path::Path| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap_or_else(|e| panic!("git {} failed: {e}", args.join(" ")));
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+
+        run(&["add", "feature.txt"], &info.path);
+        run(&["commit", "-m", "Add feature"], &info.path);
+
+        // Remove the worktree first so the branch can be checked out.
+        mgr.remove_worktree(&info.path).expect("remove failed");
+
+        // Merge the branch back into main.
+        let result = mgr.merge_branch(&branch).expect("merge failed");
+        assert_eq!(result, MergeResult::Success);
+
+        // Verify the file exists in the main repo.
+        let merged_file = repo_path.join("feature.txt");
+        assert!(merged_file.exists(), "merged file should exist in main repo");
+    }
+
+    #[test]
+    fn test_delete_branch() {
+        let (_dir, repo_path) = create_temp_repo();
+        let worktree_base = TempDir::new().expect("failed to create worktree base");
+        let mgr = WorktreeManager::new(
+            &repo_path,
+            Some(worktree_base.path().to_path_buf()),
+        )
+        .unwrap();
+
+        let branch = WorktreeManager::branch_name("plan", "delete-task");
+        let info = mgr.create_worktree(&branch).expect("create failed");
+        mgr.remove_worktree(&info.path).expect("remove failed");
+
+        // Branch should exist before deletion.
+        assert!(mgr.branch_exists(&branch).unwrap());
+
+        mgr.delete_branch(&branch).expect("delete failed");
+
+        // Branch should no longer exist.
+        assert!(!mgr.branch_exists(&branch).unwrap());
+    }
+
+    #[test]
+    fn test_delete_branch_idempotent() {
+        let (_dir, repo_path) = create_temp_repo();
+        let mgr = WorktreeManager::new(&repo_path, None).unwrap();
+
+        // Deleting a non-existent branch should not error.
+        mgr.delete_branch("gator/nonexistent/branch")
+            .expect("deleting nonexistent branch should not fail");
     }
 }

@@ -97,6 +97,7 @@ async fn create_test_task(pool: &PgPool) -> Uuid {
         "test-plan",
         "/tmp/test",
         "main",
+        None,
     )
     .await
     .expect("insert plan");

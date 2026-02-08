@@ -329,6 +329,7 @@ pub struct Plan {
     pub project_path: String,
     pub base_branch: String,
     pub status: PlanStatus,
+    pub token_budget: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub approved_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,

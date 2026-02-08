@@ -75,11 +75,20 @@ pub async fn run_dispatch(
         OrchestratorResult::HumanRequired {
             tasks_awaiting_review,
         } => {
-            println!("\nPlan requires human review. Tasks awaiting review:");
+            println!("\nPlan paused -- tasks awaiting human review:");
             for task in &tasks_awaiting_review {
                 println!("  - {task}");
             }
+            println!();
+            println!("To resume:");
+            println!("  1. Review each task: gator gate <task-id>");
+            println!("  2. Approve or reject:  gator approve <task-id>  /  gator reject <task-id>");
+            println!("  3. Re-run dispatch:    gator dispatch {plan_id}");
             std::process::exit(2);
+        }
+        OrchestratorResult::BudgetExceeded { used, budget } => {
+            println!("\nPlan stopped: token budget exceeded ({used}/{budget} tokens used).");
+            std::process::exit(3);
         }
     }
 

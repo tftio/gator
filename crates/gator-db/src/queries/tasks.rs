@@ -353,6 +353,75 @@ pub async fn reset_orphaned_tasks(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Ta
     Ok(tasks)
 }
 
+/// Reset an escalated task back to `pending` with an incremented attempt counter.
+///
+/// This is the operator override path: escalated tasks have exhausted their
+/// normal retry budget, but the operator can force a retry.
+pub async fn retry_escalated_to_pending(
+    pool: &PgPool,
+    task_id: Uuid,
+    current_attempt: i32,
+) -> Result<u64> {
+    let result = sqlx::query(
+        "UPDATE tasks \
+         SET status = 'pending', \
+             attempt = attempt + 1, \
+             assigned_harness = NULL, \
+             worktree_path = NULL, \
+             started_at = NULL, \
+             completed_at = NULL \
+         WHERE id = $1 AND status = 'escalated' AND attempt = $2",
+    )
+    .bind(task_id)
+    .bind(current_attempt)
+    .execute(pool)
+    .await
+    .context("failed to retry escalated task to pending")?;
+
+    Ok(result.rows_affected())
+}
+
+/// A task with its plan name (for cross-plan views like the review queue).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TaskWithPlanName {
+    // Task fields
+    pub id: uuid::Uuid,
+    pub plan_id: uuid::Uuid,
+    pub name: String,
+    pub description: String,
+    pub scope_level: crate::models::ScopeLevel,
+    pub gate_policy: crate::models::GatePolicy,
+    pub retry_max: i32,
+    pub status: TaskStatus,
+    pub assigned_harness: Option<String>,
+    pub worktree_path: Option<String>,
+    pub attempt: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    // Extra
+    pub plan_name: String,
+}
+
+/// List all tasks in `checking` status across all plans.
+pub async fn list_checking_tasks(pool: &PgPool) -> Result<Vec<TaskWithPlanName>> {
+    let tasks = sqlx::query_as::<_, TaskWithPlanName>(
+        "SELECT t.id, t.plan_id, t.name, t.description, t.scope_level, t.gate_policy, \
+                t.retry_max, t.status, t.assigned_harness, t.worktree_path, t.attempt, \
+                t.created_at, t.started_at, t.completed_at, \
+                p.name AS plan_name \
+         FROM tasks t \
+         JOIN plans p ON p.id = t.plan_id \
+         WHERE t.status = 'checking' \
+         ORDER BY t.created_at ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .context("failed to list checking tasks")?;
+
+    Ok(tasks)
+}
+
 /// Reset a failed task back to `pending` with an incremented attempt counter.
 ///
 /// Unlike `transition_task_retry` (which sets status to `assigned`), this

@@ -27,6 +27,8 @@ hex.workspace = true
 rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 toml.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

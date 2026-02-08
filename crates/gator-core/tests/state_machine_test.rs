@@ -163,7 +163,6 @@ fn invalid_transitions_rejected() {
         (TaskStatus::Failed, TaskStatus::Running),
         (TaskStatus::Failed, TaskStatus::Checking),
         (TaskStatus::Failed, TaskStatus::Passed),
-        (TaskStatus::Escalated, TaskStatus::Pending),
         (TaskStatus::Escalated, TaskStatus::Assigned),
     ];
     for (from, to) in &invalid {

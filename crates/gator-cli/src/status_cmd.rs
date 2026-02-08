@@ -8,7 +8,18 @@ use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
 /// Run the status command.
-pub async fn run_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
+///
+/// When `plan_id_str` is `Some`, shows detailed status for that plan.
+/// When `None`, lists all plans with a progress summary.
+pub async fn run_status(pool: &PgPool, plan_id_str: Option<&str>) -> Result<()> {
+    match plan_id_str {
+        Some(id_str) => run_plan_status(pool, id_str).await,
+        None => run_fleet_status(pool).await,
+    }
+}
+
+/// Show detailed status for a single plan.
+async fn run_plan_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
     let plan_id = Uuid::parse_str(plan_id_str)
         .with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
 
@@ -23,6 +34,9 @@ pub async fn run_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
     }
     if let Some(completed_at) = plan.completed_at {
         println!("Completed: {}", completed_at.format("%Y-%m-%d %H:%M:%S UTC"));
+    }
+    if let Some(budget) = plan.token_budget {
+        println!("Token budget: {budget}");
     }
     println!();
 
@@ -58,6 +72,42 @@ pub async fn run_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
         println!(
             "  [{}] {} (attempt {}, {})",
             status_icon, task.name, task.attempt, task.status
+        );
+    }
+
+    Ok(())
+}
+
+/// List all plans with a progress summary.
+async fn run_fleet_status(pool: &PgPool) -> Result<()> {
+    let plans = plan_db::list_plans(pool).await?;
+
+    if plans.is_empty() {
+        println!("No plans found.");
+        return Ok(());
+    }
+
+    println!(
+        "{:<38} {:<30} {:<12} {:>10}",
+        "ID", "NAME", "STATUS", "PROGRESS"
+    );
+    println!("{}", "-".repeat(92));
+
+    for plan in &plans {
+        let progress = task_db::get_plan_progress(pool, plan.id).await?;
+        let progress_str = if progress.total > 0 {
+            format!("{}/{}", progress.passed, progress.total)
+        } else {
+            "0/0".to_string()
+        };
+        let name_display = if plan.name.len() > 28 {
+            format!("{}...", &plan.name[..25])
+        } else {
+            plan.name.clone()
+        };
+        println!(
+            "{:<38} {:<30} {:<12} {:>10}",
+            plan.id, name_display, plan.status, progress_str
         );
     }
 

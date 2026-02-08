@@ -22,6 +22,9 @@ pub struct PlanMeta {
     pub name: String,
     /// Git branch to use as the base for task branches.
     pub base_branch: String,
+    /// Optional total token budget (input + output). NULL means unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_budget: Option<i64>,
 }
 
 /// A single `[[tasks]]` entry in the plan TOML.
@@ -114,11 +117,47 @@ invariants = ["rust_build", "rust_test"]
     }
 
     #[test]
+    fn deserialize_plan_with_token_budget() {
+        let toml_str = r#"
+[plan]
+name = "Budget plan"
+base_branch = "main"
+token_budget = 100000
+
+[[tasks]]
+name = "task-one"
+description = "Do something"
+scope = "narrow"
+gate = "auto"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.token_budget, Some(100000));
+    }
+
+    #[test]
+    fn deserialize_plan_without_token_budget() {
+        let toml_str = r#"
+[plan]
+name = "No budget plan"
+base_branch = "main"
+
+[[tasks]]
+name = "task-one"
+description = "Do something"
+scope = "narrow"
+gate = "auto"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.token_budget, None);
+    }
+
+    #[test]
     fn roundtrip_serialize_deserialize() {
         let plan = PlanToml {
             plan: PlanMeta {
                 name: "Roundtrip test".to_owned(),
                 base_branch: "develop".to_owned(),
+                token_budget: None,
             },
             tasks: vec![TaskToml {
                 name: "t1".to_owned(),

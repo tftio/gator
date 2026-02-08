@@ -258,6 +258,7 @@ async fn single_task_passes_completes_plan() {
         "single-task-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -307,6 +308,7 @@ async fn two_independent_tasks_both_pass() {
         "two-task-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -362,6 +364,7 @@ async fn sequential_dependency_runs_in_order() {
         "seq-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -430,6 +433,7 @@ async fn fail_no_retry_escalates_to_failed() {
         "fail-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -487,6 +491,7 @@ async fn restart_recovery_resets_orphaned_tasks() {
         "restart-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -588,6 +593,7 @@ async fn fail_then_retry_then_pass() {
         "retry-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -630,6 +636,97 @@ async fn fail_then_retry_then_pass() {
     assert_eq!(task_final.status, TaskStatus::Escalated);
     // Should have attempted twice (attempt 0, then retry to attempt 1).
     assert_eq!(task_final.attempt, 1);
+
+    harness.teardown().await;
+}
+
+#[tokio::test]
+async fn human_review_pauses_then_resumes_on_approve() {
+    let harness = TestHarness::new().await;
+    let pool = harness.pool();
+
+    // Use a passing invariant -- the gate policy is what triggers human review.
+    let inv = create_invariant(pool, "pass_inv", "true").await;
+
+    let plan = plan_db::insert_plan(
+        pool,
+        "human-review-plan",
+        &harness.repo_path.to_string_lossy(),
+        "main",
+        None,
+    )
+    .await
+    .unwrap();
+    plan_db::approve_plan(pool, plan.id).await.unwrap();
+
+    // Task with human_review gate policy: invariants pass but task stays in
+    // checking state for human approval.
+    let task = task_db::insert_task(
+        pool, plan.id, "review-task", "Needs human review",
+        "medium", "human_review", 0,
+    )
+    .await
+    .unwrap();
+    task_db::link_task_invariant(pool, task.id, inv.id)
+        .await
+        .unwrap();
+
+    let registry = make_registry(PassingMockHarness);
+    let config = OrchestratorConfig {
+        max_agents: 4,
+        task_timeout: Duration::from_secs(30),
+    };
+
+    // First dispatch: should return HumanRequired.
+    let result = run_orchestrator(
+        pool,
+        plan.id,
+        &registry,
+        &harness.worktree_manager(),
+        &test_token_config(),
+        &config,
+    )
+    .await
+    .unwrap();
+
+    match &result {
+        OrchestratorResult::HumanRequired { tasks_awaiting_review } => {
+            assert!(tasks_awaiting_review.contains(&"review-task".to_string()));
+        }
+        other => panic!("expected HumanRequired, got {:?}", other),
+    }
+
+    // Plan should still be Running (not Failed).
+    let plan_mid = plan_db::get_plan(pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(
+        plan_mid.status,
+        PlanStatus::Running,
+        "plan should stay Running during human review"
+    );
+
+    // Operator approves the task.
+    gator_core::state::dispatch::approve_task(pool, task.id).await.unwrap();
+
+    // Second dispatch: should complete now.
+    let result2 = run_orchestrator(
+        pool,
+        plan.id,
+        &registry,
+        &harness.worktree_manager(),
+        &test_token_config(),
+        &config,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result2, OrchestratorResult::Completed);
+
+    let plan_final = plan_db::get_plan(pool, plan.id).await.unwrap().unwrap();
+    assert_eq!(plan_final.status, PlanStatus::Completed);
+    assert!(plan_final.completed_at.is_some());
+
+    let task_final = task_db::get_task(pool, task.id).await.unwrap().unwrap();
+    assert_eq!(task_final.status, TaskStatus::Passed);
 
     harness.teardown().await;
 }

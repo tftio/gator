@@ -290,7 +290,7 @@ async fn create_diamond_dag(
     invariant_id: Uuid,
     retry_max: i32,
 ) -> (Uuid, HashMap<String, Uuid>) {
-    let plan = plan_db::insert_plan(pool, "diamond-plan", repo_path, "main")
+    let plan = plan_db::insert_plan(pool, "diamond-plan", repo_path, "main", None)
         .await
         .expect("insert plan");
 
@@ -508,6 +508,7 @@ async fn retry_with_escalation() {
         "retry-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -592,6 +593,7 @@ async fn timeout_kills_agent() {
         "timeout-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -675,6 +677,7 @@ async fn restart_recovery() {
         "restart-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
@@ -777,6 +780,7 @@ async fn status_and_log_after_run() {
         "status-plan",
         &harness.repo_path.to_string_lossy(),
         "main",
+        None,
     )
     .await
     .unwrap();
