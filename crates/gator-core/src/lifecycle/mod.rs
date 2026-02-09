@@ -141,10 +141,21 @@ pub async fn run_agent_lifecycle(
         .with_context(|| format!("failed to assign task {}", task.name))?;
 
     // 6. Spawn agent.
-    let handle = harness
+    let mut handle = harness
         .spawn(&materialized)
         .await
         .with_context(|| format!("failed to spawn agent for task {}", task.name))?;
+
+    // 6b. Write the task prompt to stdin and close it.
+    //     Claude Code in `-p` mode reads the user prompt from stdin.
+    if let Some(mut stdin) = handle.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let prompt = &materialized.description;
+        if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+            tracing::warn!(task_id = %task_id, error = %e, "failed to write prompt to agent stdin");
+        }
+        drop(stdin); // Close stdin so the agent starts processing.
+    }
 
     // 7. Start task (assigned -> running).
     dispatch::start_task(pool, task_id)
