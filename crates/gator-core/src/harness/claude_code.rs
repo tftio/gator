@@ -293,6 +293,7 @@ impl Harness for ClaudeCodeAdapter {
             .arg("--output-format")
             .arg("stream-json")
             .arg("--verbose")
+            .arg("--dangerously-skip-permissions")
             .arg("--allowedTools")
             .arg("Bash,Read,Edit,Write,Glob,Grep")
             .arg("--append-system-prompt")
