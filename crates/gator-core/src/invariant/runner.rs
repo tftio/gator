@@ -72,8 +72,7 @@ pub async fn run_invariant(invariant: &Invariant, working_dir: &Path) -> Result<
 
     // Wait for exit + read output concurrently, with a timeout.
     match tokio::time::timeout(timeout, async {
-        let (wait_result, stdout, stderr) =
-            tokio::join!(child.wait(), read_stdout, read_stderr);
+        let (wait_result, stdout, stderr) = tokio::join!(child.wait(), read_stdout, read_stderr);
         (wait_result, stdout, stderr)
     })
     .await
@@ -110,8 +109,7 @@ pub async fn run_invariant(invariant: &Invariant, working_dir: &Path) -> Result<
                 stdout: String::new(),
                 stderr: format!(
                     "invariant {:?} timed out after {}s",
-                    invariant.name,
-                    invariant.timeout_secs
+                    invariant.name, invariant.timeout_secs
                 ),
                 duration_ms,
             })
@@ -228,7 +226,10 @@ mod tests {
             .expect("should succeed even on timeout");
 
         assert!(!result.passed, "timed-out invariant should fail");
-        assert!(result.exit_code.is_none(), "killed process has no exit code");
+        assert!(
+            result.exit_code.is_none(),
+            "killed process has no exit code"
+        );
         assert!(
             result.stderr.contains("timed out"),
             "stderr should mention timeout, got: {:?}",

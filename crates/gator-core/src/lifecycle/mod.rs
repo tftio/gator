@@ -18,10 +18,10 @@ use gator_db::models::Task;
 use gator_db::queries::agent_events::{self, NewAgentEvent};
 use gator_db::queries::invariants as inv_db;
 
-use crate::gate::evaluator::{evaluate_verdict, GateAction};
 use crate::gate::GateRunner;
-use crate::harness::types::{AgentEvent, MaterializedTask};
+use crate::gate::evaluator::{GateAction, evaluate_verdict};
 use crate::harness::Harness;
+use crate::harness::types::{AgentEvent, MaterializedTask};
 use crate::isolation::Isolation;
 use crate::plan::materialize_task;
 use crate::state::dispatch;
@@ -270,13 +270,9 @@ fn serialize_agent_event(event: &AgentEvent) -> (String, serde_json::Value) {
             "token_usage".to_string(),
             serde_json::json!({"input_tokens": input_tokens, "output_tokens": output_tokens}),
         ),
-        AgentEvent::Error { message } => (
-            "error".to_string(),
-            serde_json::json!({"message": message}),
-        ),
-        AgentEvent::Completed => (
-            "completed".to_string(),
-            serde_json::json!({}),
-        ),
+        AgentEvent::Error { message } => {
+            ("error".to_string(), serde_json::json!({"message": message}))
+        }
+        AgentEvent::Completed => ("completed".to_string(), serde_json::json!({})),
     }
 }

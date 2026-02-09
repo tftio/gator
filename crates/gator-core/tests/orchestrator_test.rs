@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio_util::sync::CancellationToken;
 use async_trait::async_trait;
 use futures::Stream;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use gator_db::config::DbConfig;
@@ -24,7 +24,7 @@ use gator_db::queries::tasks as task_db;
 use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::{Harness, HarnessRegistry};
 use gator_core::isolation::{Isolation, worktree::WorktreeIsolation};
-use gator_core::orchestrator::{run_orchestrator, OrchestratorConfig, OrchestratorResult};
+use gator_core::orchestrator::{OrchestratorConfig, OrchestratorResult, run_orchestrator};
 use gator_core::token::TokenConfig;
 use gator_core::worktree::WorktreeManager;
 
@@ -163,8 +163,7 @@ fn create_temp_git_repo() -> (tempfile::TempDir, PathBuf) {
     run(&["init"]);
     run(&["config", "user.email", "test@gator.dev"]);
     run(&["config", "user.name", "Gator Test"]);
-    std::fs::write(repo_path.join("README.md"), "# Test repo\n")
-        .expect("failed to write README");
+    std::fs::write(repo_path.join("README.md"), "# Test repo\n").expect("failed to write README");
     run(&["add", "."]);
     run(&["commit", "-m", "Initial commit"]);
 
@@ -273,11 +272,9 @@ async fn single_task_passes_completes_plan() {
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
-    let task = task_db::insert_task(
-        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None,
-    )
-    .await
-    .unwrap();
+    let task = task_db::insert_task(pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None)
+        .await
+        .unwrap();
     task_db::link_task_invariant(pool, task.id, inv.id)
         .await
         .unwrap();
@@ -327,20 +324,16 @@ async fn two_independent_tasks_both_pass() {
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
-    let task_a = task_db::insert_task(
-        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None,
-    )
-    .await
-    .unwrap();
+    let task_a = task_db::insert_task(pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None)
+        .await
+        .unwrap();
     task_db::link_task_invariant(pool, task_a.id, inv.id)
         .await
         .unwrap();
 
-    let task_b = task_db::insert_task(
-        pool, plan.id, "task-b", "Task B", "narrow", "auto", 0, None,
-    )
-    .await
-    .unwrap();
+    let task_b = task_db::insert_task(pool, plan.id, "task-b", "Task B", "narrow", "auto", 0, None)
+        .await
+        .unwrap();
     task_db::link_task_invariant(pool, task_b.id, inv.id)
         .await
         .unwrap();
@@ -387,17 +380,22 @@ async fn sequential_dependency_runs_in_order() {
     .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
-    let task_a = task_db::insert_task(
-        pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None,
-    )
-    .await
-    .unwrap();
+    let task_a = task_db::insert_task(pool, plan.id, "task-a", "Task A", "narrow", "auto", 0, None)
+        .await
+        .unwrap();
     task_db::link_task_invariant(pool, task_a.id, inv.id)
         .await
         .unwrap();
 
     let task_b = task_db::insert_task(
-        pool, plan.id, "task-b", "Task B depends on A", "narrow", "auto", 0, None,
+        pool,
+        plan.id,
+        "task-b",
+        "Task B depends on A",
+        "narrow",
+        "auto",
+        0,
+        None,
     )
     .await
     .unwrap();
@@ -461,7 +459,14 @@ async fn fail_no_retry_escalates_to_failed() {
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
     let task = task_db::insert_task(
-        pool, plan.id, "fail-task", "Will fail", "narrow", "auto", 0, None,
+        pool,
+        plan.id,
+        "fail-task",
+        "Will fail",
+        "narrow",
+        "auto",
+        0,
+        None,
     )
     .await
     .unwrap();
@@ -526,8 +531,14 @@ async fn restart_recovery_resets_orphaned_tasks() {
         .unwrap();
 
     let task = task_db::insert_task(
-        pool, plan.id, "orphan-task", "Was running when crash happened",
-        "narrow", "auto", 3, None,
+        pool,
+        plan.id,
+        "orphan-task",
+        "Was running when crash happened",
+        "narrow",
+        "auto",
+        3,
+        None,
     )
     .await
     .unwrap();
@@ -536,14 +547,9 @@ async fn restart_recovery_resets_orphaned_tasks() {
         .unwrap();
 
     // Manually set the task to "running" to simulate a crash mid-execution.
-    task_db::assign_task_metadata(
-        pool,
-        task.id,
-        "mock-harness",
-        "/tmp/fake-worktree",
-    )
-    .await
-    .unwrap();
+    task_db::assign_task_metadata(pool, task.id, "mock-harness", "/tmp/fake-worktree")
+        .await
+        .unwrap();
     task_db::transition_task_status(
         pool,
         task.id,
@@ -629,8 +635,14 @@ async fn fail_then_retry_then_pass() {
     plan_db::approve_plan(pool, plan.id).await.unwrap();
 
     let task = task_db::insert_task(
-        pool, plan.id, "retry-task", "Will fail then retry",
-        "narrow", "auto", 1, None,
+        pool,
+        plan.id,
+        "retry-task",
+        "Will fail then retry",
+        "narrow",
+        "auto",
+        1,
+        None,
     )
     .await
     .unwrap();
@@ -695,8 +707,14 @@ async fn human_review_pauses_then_resumes_on_approve() {
     // Task with human_review gate policy: invariants pass but task stays in
     // checking state for human approval.
     let task = task_db::insert_task(
-        pool, plan.id, "review-task", "Needs human review",
-        "medium", "human_review", 0, None,
+        pool,
+        plan.id,
+        "review-task",
+        "Needs human review",
+        "medium",
+        "human_review",
+        0,
+        None,
     )
     .await
     .unwrap();
@@ -725,7 +743,9 @@ async fn human_review_pauses_then_resumes_on_approve() {
     .unwrap();
 
     match &result {
-        OrchestratorResult::HumanRequired { tasks_awaiting_review } => {
+        OrchestratorResult::HumanRequired {
+            tasks_awaiting_review,
+        } => {
             assert!(tasks_awaiting_review.contains(&"review-task".to_string()));
         }
         other => panic!("expected HumanRequired, got {:?}", other),
@@ -740,7 +760,9 @@ async fn human_review_pauses_then_resumes_on_approve() {
     );
 
     // Operator approves the task.
-    gator_core::state::dispatch::approve_task(pool, task.id).await.unwrap();
+    gator_core::state::dispatch::approve_task(pool, task.id)
+        .await
+        .unwrap();
 
     // Second dispatch: should complete now.
     let result2 = run_orchestrator(

@@ -55,13 +55,12 @@ pub async fn get_task(pool: &PgPool, id: Uuid) -> Result<Option<Task>> {
 
 /// List all tasks for a given plan, ordered by creation time.
 pub async fn list_tasks_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Task>> {
-    let tasks = sqlx::query_as::<_, Task>(
-        "SELECT * FROM tasks WHERE plan_id = $1 ORDER BY created_at ASC",
-    )
-    .bind(plan_id)
-    .fetch_all(pool)
-    .await
-    .context("failed to list tasks for plan")?;
+    let tasks =
+        sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE plan_id = $1 ORDER BY created_at ASC")
+            .bind(plan_id)
+            .fetch_all(pool)
+            .await
+            .context("failed to list tasks for plan")?;
 
     Ok(tasks)
 }
@@ -150,11 +149,7 @@ pub async fn count_dependency_edges(pool: &PgPool, plan_id: Uuid) -> Result<i64>
 /// Link a task to an invariant.
 ///
 /// Uses `ON CONFLICT DO NOTHING` so this is idempotent.
-pub async fn link_task_invariant(
-    pool: &PgPool,
-    task_id: Uuid,
-    invariant_id: Uuid,
-) -> Result<()> {
+pub async fn link_task_invariant(pool: &PgPool, task_id: Uuid, invariant_id: Uuid) -> Result<()> {
     sqlx::query(
         "INSERT INTO task_invariants (task_id, invariant_id) VALUES ($1, $2) \
          ON CONFLICT DO NOTHING",

@@ -122,20 +122,16 @@ pub async fn operator_retry_task(pool: &PgPool, task_id: Uuid, force: bool) -> R
                     task.retry_max
                 );
             }
-            let rows =
-                gator_db::queries::tasks::retry_task_to_pending(pool, task_id, task.attempt)
-                    .await?;
+            let rows = gator_db::queries::tasks::retry_task_to_pending(pool, task_id, task.attempt)
+                .await?;
             if rows == 0 {
                 bail!("optimistic lock failed on retry for task {}", task_id);
             }
         }
         TaskStatus::Escalated => {
-            let rows = gator_db::queries::tasks::retry_escalated_to_pending(
-                pool,
-                task_id,
-                task.attempt,
-            )
-            .await?;
+            let rows =
+                gator_db::queries::tasks::retry_escalated_to_pending(pool, task_id, task.attempt)
+                    .await?;
             if rows == 0 {
                 bail!(
                     "optimistic lock failed on retry-from-escalated for task {}",

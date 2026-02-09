@@ -134,8 +134,10 @@ fn parse_stream_json_line(line: &str) -> Result<Vec<AgentEvent>> {
 
                 // Extract token usage if present.
                 if let Some(usage) = message.get("usage") {
-                    let input_tokens =
-                        usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let input_tokens = usage
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
                     let output_tokens = usage
                         .get("output_tokens")
                         .and_then(|v| v.as_u64())
@@ -160,10 +162,7 @@ fn parse_stream_json_line(line: &str) -> Result<Vec<AgentEvent>> {
                 .and_then(|n| n.as_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let input = v
-                .get("input")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
+            let input = v.get("input").cloned().unwrap_or(serde_json::Value::Null);
             events.push(AgentEvent::ToolCall {
                 tool: tool_name,
                 input,
@@ -204,8 +203,10 @@ fn parse_stream_json_line(line: &str) -> Result<Vec<AgentEvent>> {
             }
             // Also check for usage at top level of result.
             if let Some(usage) = v.get("usage") {
-                let input_tokens =
-                    usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let input_tokens = usage
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let output_tokens = usage
                     .get("output_tokens")
                     .and_then(|v| v.as_u64())
@@ -236,7 +237,10 @@ fn parse_stream_json_line(line: &str) -> Result<Vec<AgentEvent>> {
         // Unrecognised -- ignore but log
         // ----------------------------------------------------------------
         other => {
-            debug!(event_type = other, "ignoring unrecognised stream-json event type");
+            debug!(
+                event_type = other,
+                "ignoring unrecognised stream-json event type"
+            );
         }
     }
 
@@ -327,13 +331,7 @@ impl Harness for ClaudeCodeAdapter {
         // is_running().
         {
             let mut processes = self.processes.lock().await;
-            processes.insert(
-                pid,
-                ProcessState {
-                    child,
-                    stdout,
-                },
-            );
+            processes.insert(pid, ProcessState { child, stdout });
         }
 
         Ok(AgentHandle {
@@ -459,11 +457,8 @@ impl Harness for ClaudeCodeAdapter {
             }
 
             // Wait briefly for graceful shutdown.
-            let exited = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                state.child.wait(),
-            )
-            .await;
+            let exited =
+                tokio::time::timeout(std::time::Duration::from_secs(5), state.child.wait()).await;
 
             match exited {
                 Ok(Ok(_status)) => {
@@ -530,9 +525,10 @@ mod tests {
             description: "A test task for unit testing.".to_string(),
             invariant_commands: vec!["echo ok".to_string()],
             working_dir: working_dir.to_path_buf(),
-            env_vars: HashMap::from([
-                ("GATOR_AGENT_TOKEN".to_string(), "gator_at_test_0_abc".to_string()),
-            ]),
+            env_vars: HashMap::from([(
+                "GATOR_AGENT_TOKEN".to_string(),
+                "gator_at_test_0_abc".to_string(),
+            )]),
         }
     }
 
@@ -705,8 +701,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());
@@ -727,7 +722,11 @@ mod tests {
         // 5. Message "Done."
         // 6. TokenUsage 100/50
         // 7. Completed
-        assert!(events.len() >= 5, "expected at least 5 events, got {}", events.len());
+        assert!(
+            events.len() >= 5,
+            "expected at least 5 events, got {}",
+            events.len()
+        );
 
         // Check first event is the assistant message.
         assert_eq!(
@@ -743,13 +742,17 @@ mod tests {
 
         // Check a ToolCall is present.
         assert!(
-            events.iter().any(|e| matches!(e, AgentEvent::ToolCall { tool, .. } if tool == "Bash")),
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolCall { tool, .. } if tool == "Bash")),
             "expected a ToolCall for Bash"
         );
 
         // Check a ToolResult is present.
         assert!(
-            events.iter().any(|e| matches!(e, AgentEvent::ToolResult { tool, .. } if tool == "Bash")),
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolResult { tool, .. } if tool == "Bash")),
             "expected a ToolResult for Bash"
         );
     }
@@ -771,8 +774,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());
@@ -783,7 +785,9 @@ mod tests {
 
         // Should get the valid message + Completed, malformed lines skipped.
         assert!(
-            events.iter().any(|e| matches!(e, AgentEvent::Message { content, .. } if content == "valid line")),
+            events.iter().any(
+                |e| matches!(e, AgentEvent::Message { content, .. } if content == "valid line")
+            ),
             "expected the valid message event"
         );
         assert_eq!(events.last().unwrap(), &AgentEvent::Completed);
@@ -808,17 +812,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         // A script that sleeps forever (until killed).
         let script_path = tmp.path().join("sleepy_claude.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\nsleep 3600\n",
-        )
-        .unwrap();
+        std::fs::write(&script_path, "#!/bin/sh\nsleep 3600\n").unwrap();
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());
@@ -837,17 +836,12 @@ mod tests {
     async fn is_running_returns_false_after_exit() {
         let tmp = tempfile::tempdir().unwrap();
         let script_path = tmp.path().join("quick_claude.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\necho done\n",
-        )
-        .unwrap();
+        std::fs::write(&script_path, "#!/bin/sh\necho done\n").unwrap();
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());
@@ -878,8 +872,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());
@@ -893,7 +886,11 @@ mod tests {
 
         // Second call should get an error + completed (stdout already consumed).
         let events2: Vec<AgentEvent> = adapter.events(&handle).collect().await;
-        assert!(events2.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+        assert!(
+            events2
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Error { .. }))
+        );
         assert_eq!(events2.last().unwrap(), &AgentEvent::Completed);
     }
 
@@ -952,8 +949,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         // Create a sub-directory to use as working dir.
@@ -980,7 +976,10 @@ mod tests {
                 false
             }
         });
-        assert!(has_workdir_event, "expected working directory in events output, events: {events:?}");
+        assert!(
+            has_workdir_event,
+            "expected working directory in events output, events: {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -997,8 +996,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());
@@ -1014,7 +1012,10 @@ mod tests {
                 false
             }
         });
-        assert!(has_token_event, "expected GATOR_AGENT_TOKEN in output, events: {events:?}");
+        assert!(
+            has_token_event,
+            "expected GATOR_AGENT_TOKEN in output, events: {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -1022,17 +1023,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let script_path = tmp.path().join("exit_claude.sh");
         // Script that exits with code 1 without any output.
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\nexit 1\n",
-        )
-        .unwrap();
+        std::fs::write(&script_path, "#!/bin/sh\nexit 1\n").unwrap();
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let adapter = ClaudeCodeAdapter::with_binary(script_path.to_str().unwrap());

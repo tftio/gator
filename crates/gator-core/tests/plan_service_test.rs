@@ -127,10 +127,14 @@ depends_on = ["task-a"]
     assert_eq!(task_b.description, "Second task, depends on A");
 
     // Verify dependency: task-b depends on task-a.
-    let b_deps = tasks::get_task_dependencies(&pool, task_b.id).await.unwrap();
+    let b_deps = tasks::get_task_dependencies(&pool, task_b.id)
+        .await
+        .unwrap();
     assert_eq!(b_deps, vec![task_a.id]);
 
-    let a_deps = tasks::get_task_dependencies(&pool, task_a.id).await.unwrap();
+    let a_deps = tasks::get_task_dependencies(&pool, task_a.id)
+        .await
+        .unwrap();
     assert!(a_deps.is_empty());
 
     pool.close().await;
@@ -205,13 +209,11 @@ invariants = ["my_check", "missing_one"]
     let task_list = tasks::list_tasks_for_plan(&pool, plan.id).await.unwrap();
     let task = &task_list[0];
 
-    let linked: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM task_invariants WHERE task_id = $1",
-    )
-    .bind(task.id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let linked: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM task_invariants WHERE task_id = $1")
+        .bind(task.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     assert_eq!(linked.0, 1);
 
@@ -403,7 +405,12 @@ depends_on = ["task-alpha", "task-beta"]
             .tasks
             .iter()
             .find(|t| t.name == original_task.name)
-            .unwrap_or_else(|| panic!("task {:?} not found in materialized output", original_task.name));
+            .unwrap_or_else(|| {
+                panic!(
+                    "task {:?} not found in materialized output",
+                    original_task.name
+                )
+            });
 
         assert_eq!(
             reparsed_task.description, original_task.description,
@@ -586,7 +593,10 @@ depends_on = ["root-task"]
 
     // Verify markdown structure.
     assert!(root_md.contains("# Task: root-task"), "should have title");
-    assert!(root_md.contains("**Status:** pending"), "should have status");
+    assert!(
+        root_md.contains("**Status:** pending"),
+        "should have status"
+    );
     assert!(root_md.contains("**Scope:** narrow"), "should have scope");
     assert!(
         root_md.contains("**Gate policy:** auto"),

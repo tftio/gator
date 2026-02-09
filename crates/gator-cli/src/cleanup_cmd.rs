@@ -18,8 +18,8 @@ pub async fn run_cleanup(pool: &PgPool, plan_id_str: &str, all: bool) -> Result<
         .await?
         .with_context(|| format!("plan {plan_id} not found"))?;
 
-    let worktree_manager = WorktreeManager::new(&plan.project_path, None)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let worktree_manager =
+        WorktreeManager::new(&plan.project_path, None).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let tasks = task_db::list_tasks_for_plan(pool, plan_id).await?;
 
@@ -46,7 +46,10 @@ pub async fn run_cleanup(pool: &PgPool, plan_id_str: &str, all: bool) -> Result<
                     removed += 1;
                 }
                 Err(e) => {
-                    eprintln!("  Warning: failed to remove worktree for {}: {e}", task.name);
+                    eprintln!(
+                        "  Warning: failed to remove worktree for {}: {e}",
+                        task.name
+                    );
                 }
             }
         }
@@ -55,9 +58,7 @@ pub async fn run_cleanup(pool: &PgPool, plan_id_str: &str, all: bool) -> Result<
     // Prune any stale worktree references.
     let _ = worktree_manager.cleanup_stale();
 
-    println!(
-        "\nCleanup complete: {removed} worktree(s) removed, {skipped} skipped."
-    );
+    println!("\nCleanup complete: {removed} worktree(s) removed, {skipped} skipped.");
 
     Ok(())
 }

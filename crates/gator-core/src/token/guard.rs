@@ -51,8 +51,7 @@ pub fn require_operator_mode_with_value(token_value: Option<String>) -> Result<(
 /// - The agent token environment variable is not set
 /// - The token is malformed or has an invalid HMAC
 pub fn require_agent_mode(config: &TokenConfig) -> Result<TokenClaims, GuardError> {
-    let token = std::env::var(AGENT_TOKEN_ENV)
-        .map_err(|_| GuardError::NotInAgentMode)?;
+    let token = std::env::var(AGENT_TOKEN_ENV).map_err(|_| GuardError::NotInAgentMode)?;
     require_agent_mode_with_value(config, &token)
 }
 

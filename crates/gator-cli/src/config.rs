@@ -61,8 +61,7 @@ pub fn load_config() -> Result<ConfigFile> {
     let path = config_path();
     let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("failed to read config file at {}", path.display()))?;
-    let config: ConfigFile =
-        toml::from_str(&contents).context("failed to parse config file")?;
+    let config: ConfigFile = toml::from_str(&contents).context("failed to parse config file")?;
     Ok(config)
 }
 
@@ -256,10 +255,7 @@ mod tests {
         unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "test-secret-for-resolve") };
 
         let config = GatorConfig::resolve(None).unwrap();
-        assert_eq!(
-            config.db_config.database_url,
-            "postgresql://env:5432/envdb"
-        );
+        assert_eq!(config.db_config.database_url, "postgresql://env:5432/envdb");
 
         unsafe { std::env::remove_var("GATOR_DATABASE_URL") };
         unsafe { std::env::remove_var("GATOR_TOKEN_SECRET") };

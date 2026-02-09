@@ -28,7 +28,9 @@ pub enum PlanParseError {
     #[error("invalid scope {value:?} on task {task:?} (expected narrow, medium, or broad)")]
     InvalidScope { task: String, value: String },
 
-    #[error("invalid gate {value:?} on task {task:?} (expected auto, human_review, or human_approve)")]
+    #[error(
+        "invalid gate {value:?} on task {task:?} (expected auto, human_review, or human_approve)"
+    )]
     InvalidGate { task: String, value: String },
 
     #[error("dependency cycle detected involving tasks: {0}")]

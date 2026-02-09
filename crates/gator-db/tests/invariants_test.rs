@@ -15,9 +15,7 @@ use uuid::Uuid;
 use gator_db::config::DbConfig;
 use gator_db::models::{InvariantKind, InvariantScope};
 use gator_db::pool;
-use gator_db::queries::invariants::{
-    self, NewInvariant,
-};
+use gator_db::queries::invariants::{self, NewInvariant};
 
 /// Helper: create a unique temporary database and return a pool pointing at it.
 async fn create_temp_db() -> (PgPool, String) {
@@ -199,10 +197,7 @@ async fn unique_name_constraint() {
 
     // Second insert with the same name should fail.
     let result = invariants::insert_invariant(&pool, &new).await;
-    assert!(
-        result.is_err(),
-        "duplicate name should be rejected"
-    );
+    assert!(result.is_err(), "duplicate name should be rejected");
 
     pool.close().await;
     drop_temp_db(&db_name).await;
@@ -237,7 +232,10 @@ async fn delete_nonexistent_invariant_fails() {
     let (pool, db_name) = create_temp_db().await;
 
     let result = invariants::delete_invariant(&pool, Uuid::new_v4()).await;
-    assert!(result.is_err(), "deleting nonexistent invariant should fail");
+    assert!(
+        result.is_err(),
+        "deleting nonexistent invariant should fail"
+    );
 
     pool.close().await;
     drop_temp_db(&db_name).await;
@@ -411,7 +409,10 @@ async fn insert_invariant_with_all_fields() {
         .expect("insert should succeed");
 
     assert_eq!(inserted.name, "full_test");
-    assert_eq!(inserted.description.as_deref(), Some("A fully-specified invariant"));
+    assert_eq!(
+        inserted.description.as_deref(),
+        Some("A fully-specified invariant")
+    );
     assert_eq!(inserted.kind, InvariantKind::Coverage);
     assert_eq!(inserted.command, "cargo");
     assert_eq!(inserted.args, vec!["--workspace", "--release"]);

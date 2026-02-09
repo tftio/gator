@@ -15,9 +15,7 @@ pub async fn create_pool(config: &DbConfig) -> Result<PgPool> {
         .acquire_timeout(Duration::from_secs(10))
         .connect(&config.database_url)
         .await
-        .with_context(|| {
-            format!("failed to connect to database at {}", config.database_url)
-        })?;
+        .with_context(|| format!("failed to connect to database at {}", config.database_url))?;
     Ok(pool)
 }
 
@@ -84,10 +82,7 @@ pub async fn ensure_database_exists(config: &DbConfig) -> Result<()> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
-            anyhow::bail!(
-                "database name {:?} contains invalid characters",
-                db_name
-            );
+            anyhow::bail!("database name {:?} contains invalid characters", db_name);
         }
         let stmt = format!("CREATE DATABASE {db_name}");
         maint_pool

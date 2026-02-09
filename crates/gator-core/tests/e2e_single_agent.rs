@@ -21,22 +21,22 @@ use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
 use gator_db::config::DbConfig;
-use gator_db::models::{
-    InvariantKind, InvariantScope, PlanStatus, TaskStatus,
-};
+use gator_db::models::{InvariantKind, InvariantScope, PlanStatus, TaskStatus};
 use gator_db::pool;
 use gator_db::queries::gate_results;
 use gator_db::queries::invariants::{self, NewInvariant};
 use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
-use gator_core::gate::evaluator::{evaluate_verdict, GateAction};
+use gator_core::gate::evaluator::{GateAction, evaluate_verdict};
 use gator_core::gate::{GateRunner, GateVerdict};
-use gator_core::plan::{create_plan_from_toml, get_plan_with_tasks, materialize_task, parse_plan_toml};
+use gator_core::plan::{
+    create_plan_from_toml, get_plan_with_tasks, materialize_task, parse_plan_toml,
+};
 use gator_core::state::dispatch;
 use gator_core::state::queries as state_queries;
-use gator_core::token::{self, TokenConfig};
 use gator_core::token::guard;
+use gator_core::token::{self, TokenConfig};
 use gator_core::worktree::WorktreeManager;
 
 // ===========================================================================
@@ -194,8 +194,7 @@ fn create_temp_git_repo() -> (tempfile::TempDir, PathBuf) {
     run(&["config", "user.email", "test@gator.dev"]);
     run(&["config", "user.name", "Gator Test"]);
 
-    std::fs::write(repo_path.join("README.md"), "# Test repo\n")
-        .expect("failed to write README");
+    std::fs::write(repo_path.join("README.md"), "# Test repo\n").expect("failed to write README");
 
     run(&["add", "."]);
     run(&["commit", "-m", "Initial commit"]);
@@ -257,17 +256,9 @@ async fn e2e_happy_path_single_agent_dispatch() {
     // -----------------------------------------------------------------
     // Step 2: Add invariants.
     // -----------------------------------------------------------------
-    let echo_inv = insert_invariant(
-        pool,
-        "echo_test",
-        "echo",
-        &["ok".to_owned()],
-        0,
-    )
-    .await;
+    let echo_inv = insert_invariant(pool, "echo_test", "echo", &["ok".to_owned()], 0).await;
 
-    let _always_pass_inv =
-        insert_invariant(pool, "always_pass", "true", &[], 0).await;
+    let _always_pass_inv = insert_invariant(pool, "always_pass", "true", &[], 0).await;
 
     // Verify invariants are in the database.
     let inv_list = invariants::list_invariants(pool)
@@ -294,14 +285,12 @@ depends_on = []
 invariants = ["echo_test", "always_pass"]
 "#;
 
-    let plan_toml = parse_plan_toml(plan_toml_content)
-        .expect("plan TOML should parse");
+    let plan_toml = parse_plan_toml(plan_toml_content).expect("plan TOML should parse");
 
     let project_path = harness.repo_path().to_string_lossy().to_string();
-    let (plan, warnings) =
-        create_plan_from_toml(pool, &plan_toml, &project_path)
-            .await
-            .expect("create_plan_from_toml should succeed");
+    let (plan, warnings) = create_plan_from_toml(pool, &plan_toml, &project_path)
+        .await
+        .expect("create_plan_from_toml should succeed");
 
     assert!(
         warnings.is_empty(),
@@ -358,29 +347,19 @@ invariants = ["echo_test", "always_pass"]
 
     // 5c. Generate a scoped token.
     let attempt: u32 = 0;
-    let agent_token =
-        token::generate_token(&token_config, task_id, attempt);
+    let agent_token = token::generate_token(&token_config, task_id, attempt);
 
     // Validate the token round-trips correctly.
-    let claims = token::validate_token(&token_config, &agent_token)
-        .expect("token should validate");
+    let claims = token::validate_token(&token_config, &agent_token).expect("token should validate");
     assert_eq!(claims.task_id, task_id);
     assert_eq!(claims.attempt, attempt);
 
     // 5d. Assign the task (pending -> assigned).
-    dispatch::assign_task(
-        pool,
-        task_id,
-        "test-harness",
-        &wt_info.path,
-    )
-    .await
-    .expect("assign_task should succeed");
-
-    let task = task_db::get_task(pool, task_id)
+    dispatch::assign_task(pool, task_id, "test-harness", &wt_info.path)
         .await
-        .unwrap()
-        .unwrap();
+        .expect("assign_task should succeed");
+
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Assigned);
     assert_eq!(task.assigned_harness.as_deref(), Some("test-harness"));
     assert_eq!(
@@ -393,10 +372,7 @@ invariants = ["echo_test", "always_pass"]
         .await
         .expect("start_task should succeed");
 
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
     assert!(task.started_at.is_some());
 
@@ -442,10 +418,7 @@ invariants = ["echo_test", "always_pass"]
     );
 
     // Task is now in 'checking' state.
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Checking);
 
     // 6c. `gator done` equivalent: evaluate the verdict.
@@ -455,10 +428,7 @@ invariants = ["echo_test", "always_pass"]
     assert_eq!(action, GateAction::AutoPassed);
 
     // Task should now be 'passed'.
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Passed);
     assert!(task.completed_at.is_some());
 
@@ -521,11 +491,7 @@ invariants = ["echo_test", "always_pass"]
         .find(|gr| gr.invariant_id == echo_inv.id)
         .expect("should find echo_test gate result");
     assert!(
-        echo_result
-            .stdout
-            .as_deref()
-            .unwrap_or("")
-            .contains("ok"),
+        echo_result.stdout.as_deref().unwrap_or("").contains("ok"),
         "echo_test stdout should contain 'ok'"
     );
 
@@ -572,10 +538,8 @@ async fn e2e_invariant_failure_retry_then_pass() {
     // -----------------------------------------------------------------
     // Setup: Create invariants -- one that passes, one that fails.
     // -----------------------------------------------------------------
-    let pass_inv =
-        insert_invariant(pool, "always_true", "true", &[], 0).await;
-    let fail_inv =
-        insert_invariant(pool, "always_false", "false", &[], 0).await;
+    let pass_inv = insert_invariant(pool, "always_true", "true", &[], 0).await;
+    let fail_inv = insert_invariant(pool, "always_false", "false", &[], 0).await;
 
     // -----------------------------------------------------------------
     // Create plan with a task linked to BOTH invariants (so gate fails).
@@ -595,14 +559,12 @@ depends_on = []
 invariants = ["always_true", "always_false"]
 "#;
 
-    let plan_toml = parse_plan_toml(plan_toml_content)
-        .expect("plan TOML should parse");
+    let plan_toml = parse_plan_toml(plan_toml_content).expect("plan TOML should parse");
 
     let project_path = harness.repo_path().to_string_lossy().to_string();
-    let (plan, warnings) =
-        create_plan_from_toml(pool, &plan_toml, &project_path)
-            .await
-            .expect("create_plan_from_toml should succeed");
+    let (plan, warnings) = create_plan_from_toml(pool, &plan_toml, &project_path)
+        .await
+        .expect("create_plan_from_toml should succeed");
     assert!(warnings.is_empty());
 
     // Approve the plan.
@@ -655,10 +617,7 @@ invariants = ["always_true", "always_false"]
     assert_eq!(action, GateAction::AutoFailed { can_retry: true });
 
     // Task should be in 'failed' state.
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Failed);
     assert_eq!(task.attempt, 0);
 
@@ -689,14 +648,17 @@ invariants = ["always_true", "always_false"]
         .await
         .expect("retry should succeed");
 
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Assigned);
     assert_eq!(task.attempt, 1);
-    assert!(task.started_at.is_none(), "started_at should be cleared on retry");
-    assert!(task.completed_at.is_none(), "completed_at should be cleared on retry");
+    assert!(
+        task.started_at.is_none(),
+        "started_at should be cleared on retry"
+    );
+    assert!(
+        task.completed_at.is_none(),
+        "completed_at should be cleared on retry"
+    );
 
     // -----------------------------------------------------------------
     // Second attempt: fix the problem by unlinking the failing invariant,
@@ -738,10 +700,7 @@ invariants = ["always_true", "always_false"]
     assert_eq!(action_2, GateAction::AutoPassed);
 
     // Task should be passed.
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Passed);
     assert!(task.completed_at.is_some());
 
@@ -780,8 +739,7 @@ async fn e2e_invariant_failure_no_retry() {
     let pool = harness.pool();
 
     // Create a failing invariant.
-    let _fail_inv =
-        insert_invariant(pool, "will_fail", "false", &[], 0).await;
+    let _fail_inv = insert_invariant(pool, "will_fail", "false", &[], 0).await;
 
     let plan_toml_content = r#"
 [plan]
@@ -826,21 +784,19 @@ invariants = ["will_fail"]
     assert!(matches!(verdict, GateVerdict::Failed { .. }));
 
     // Evaluate: should auto-fail, can_retry = false.
-    let action = evaluate_verdict(pool, task_id, &verdict)
-        .await
-        .unwrap();
+    let action = evaluate_verdict(pool, task_id, &verdict).await.unwrap();
     assert_eq!(action, GateAction::AutoFailed { can_retry: false });
 
     // Task should be failed.
-    let task = task_db::get_task(pool, task_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let task = task_db::get_task(pool, task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Failed);
 
     // Retry should fail (attempt 0 >= retry_max 0).
     let retry_result = dispatch::retry_task(pool, task_id).await;
-    assert!(retry_result.is_err(), "retry should fail when retry_max = 0");
+    assert!(
+        retry_result.is_err(),
+        "retry should fail when retry_max = 0"
+    );
     let err_msg = format!("{}", retry_result.unwrap_err());
     assert!(
         err_msg.contains("retry_max"),

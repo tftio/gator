@@ -11,11 +11,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio_util::sync::CancellationToken;
 use async_trait::async_trait;
 use futures::Stream;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use gator_db::config::DbConfig;
@@ -29,7 +29,7 @@ use gator_db::queries::tasks as task_db;
 use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::{Harness, HarnessRegistry};
 use gator_core::isolation::{Isolation, worktree::WorktreeIsolation};
-use gator_core::orchestrator::{run_orchestrator, OrchestratorConfig, OrchestratorResult};
+use gator_core::orchestrator::{OrchestratorConfig, OrchestratorResult, run_orchestrator};
 use gator_core::token::TokenConfig;
 use gator_core::worktree::WorktreeManager;
 
@@ -168,8 +168,7 @@ fn create_temp_git_repo() -> (tempfile::TempDir, PathBuf) {
     run(&["init"]);
     run(&["config", "user.email", "test@gator.dev"]);
     run(&["config", "user.name", "Gator Test"]);
-    std::fs::write(repo_path.join("README.md"), "# Test repo\n")
-        .expect("failed to write README");
+    std::fs::write(repo_path.join("README.md"), "# Test repo\n").expect("failed to write README");
     run(&["add", "."]);
     run(&["commit", "-m", "Initial commit"]);
 
@@ -256,15 +255,13 @@ impl Harness for ConfigurableMockHarness {
         };
 
         match behavior {
-            TaskBehavior::Complete => {
-                Box::pin(futures::stream::iter(vec![
-                    AgentEvent::Message {
-                        role: "assistant".to_string(),
-                        content: format!("Working on {task_name}"),
-                    },
-                    AgentEvent::Completed,
-                ]))
-            }
+            TaskBehavior::Complete => Box::pin(futures::stream::iter(vec![
+                AgentEvent::Message {
+                    role: "assistant".to_string(),
+                    content: format!("Working on {task_name}"),
+                },
+                AgentEvent::Completed,
+            ])),
             TaskBehavior::Hang => Box::pin(futures::stream::pending()),
         }
     }
@@ -296,9 +293,17 @@ async fn create_diamond_dag(
     invariant_id: Uuid,
     retry_max: i32,
 ) -> (Uuid, HashMap<String, Uuid>) {
-    let plan = plan_db::insert_plan(pool, "diamond-plan", repo_path, "main", None, "claude-code", "worktree")
-        .await
-        .expect("insert plan");
+    let plan = plan_db::insert_plan(
+        pool,
+        "diamond-plan",
+        repo_path,
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .expect("insert plan");
 
     plan_db::approve_plan(pool, plan.id)
         .await
@@ -422,13 +427,8 @@ async fn diamond_dag_topological_order() {
     .await
     .expect("insert invariant");
 
-    let (plan_id, task_ids) = create_diamond_dag(
-        pool,
-        &harness.repo_path.to_string_lossy(),
-        inv.id,
-        0,
-    )
-    .await;
+    let (plan_id, task_ids) =
+        create_diamond_dag(pool, &harness.repo_path.to_string_lossy(), inv.id, 0).await;
 
     let mock = ConfigurableMockHarness::new(HashMap::new());
     let spawn_log = mock.spawn_log.clone();
@@ -455,7 +455,12 @@ async fn diamond_dag_topological_order() {
     // Verify all tasks passed.
     for (name, id) in &task_ids {
         let task = task_db::get_task(pool, *id).await.unwrap().unwrap();
-        assert_eq!(task.status, TaskStatus::Passed, "task {} should be passed", name);
+        assert_eq!(
+            task.status,
+            TaskStatus::Passed,
+            "task {} should be passed",
+            name
+        );
     }
 
     // Verify topological order from spawn_log.

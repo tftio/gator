@@ -11,7 +11,9 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use gator_core::plan::{create_plan_from_toml, get_plan_with_tasks, materialize_plan, parse_plan_toml};
+use gator_core::plan::{
+    create_plan_from_toml, get_plan_with_tasks, materialize_plan, parse_plan_toml,
+};
 use gator_db::queries::{invariants as inv_queries, plans as plan_queries, tasks as task_queries};
 
 use crate::PlanCommands;
@@ -99,24 +101,18 @@ async fn cmd_show_all(pool: &PgPool) -> Result<()> {
     // Build a map of plan_id -> task count.
     let mut task_counts: HashMap<Uuid, i64> = HashMap::new();
     for plan in &plans {
-        let row: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM tasks WHERE plan_id = $1")
-                .bind(plan.id)
-                .fetch_one(pool)
-                .await
-                .context("failed to count tasks")?;
+        let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tasks WHERE plan_id = $1")
+            .bind(plan.id)
+            .fetch_one(pool)
+            .await
+            .context("failed to count tasks")?;
         task_counts.insert(plan.id, row.0);
     }
 
     // Compute column widths for a clean table.
     // ID is always 36 chars (UUID). Status max is 9 (completed).
     let id_w = 36;
-    let name_w = plans
-        .iter()
-        .map(|p| p.name.len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
+    let name_w = plans.iter().map(|p| p.name.len()).max().unwrap_or(4).max(4);
     let status_w = 9;
     let tasks_w = 5;
 

@@ -9,7 +9,7 @@ pub mod worktree;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 
 /// Information about a created workspace.
@@ -52,6 +52,8 @@ pub fn create_isolation(mode: &str, repo_path: &Path) -> Result<Arc<dyn Isolatio
             };
             Ok(Arc::new(container::ContainerIsolation::new(config)))
         }
-        other => bail!("unknown isolation mode: {other:?} (expected \"worktree\" or \"container\")"),
+        other => {
+            bail!("unknown isolation mode: {other:?} (expected \"worktree\" or \"container\")")
+        }
     }
 }

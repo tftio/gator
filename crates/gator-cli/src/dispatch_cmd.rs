@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use gator_core::harness::{ClaudeCodeAdapter, HarnessRegistry};
 use gator_core::isolation;
-use gator_core::orchestrator::{run_orchestrator, OrchestratorConfig, OrchestratorResult};
+use gator_core::orchestrator::{OrchestratorConfig, OrchestratorResult, run_orchestrator};
 use gator_core::token::TokenConfig;
 use gator_db::queries::plans as plan_db;
 
@@ -24,8 +24,8 @@ pub async fn run_dispatch(
     token_config: &TokenConfig,
 ) -> Result<()> {
     // Parse plan ID.
-    let plan_id = Uuid::parse_str(plan_id_str)
-        .with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
+    let plan_id =
+        Uuid::parse_str(plan_id_str).with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
 
     // Load plan to get project_path.
     let plan = plan_db::get_plan(pool, plan_id)
@@ -42,10 +42,8 @@ pub async fn run_dispatch(
     let registry = Arc::new(registry);
 
     // Set up isolation backend based on plan configuration.
-    let isolation = isolation::create_isolation(
-        &plan.isolation,
-        std::path::Path::new(&plan.project_path),
-    )?;
+    let isolation =
+        isolation::create_isolation(&plan.isolation, std::path::Path::new(&plan.project_path))?;
 
     // Build config.
     let config = OrchestratorConfig {

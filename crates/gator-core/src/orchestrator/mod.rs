@@ -4,9 +4,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::PgPool;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -17,7 +17,7 @@ use gator_db::queries::tasks as task_db;
 
 use crate::harness::HarnessRegistry;
 use crate::isolation::Isolation;
-use crate::lifecycle::{run_agent_lifecycle, LifecycleConfig, LifecycleResult};
+use crate::lifecycle::{LifecycleConfig, LifecycleResult, run_agent_lifecycle};
 use crate::state::dispatch;
 use crate::token::TokenConfig;
 
@@ -287,7 +287,9 @@ pub async fn run_orchestrator(
             let task_id = task.id;
 
             // Choose harness: per-task > plan default > first registered.
-            let preferred = task.requested_harness.clone()
+            let preferred = task
+                .requested_harness
+                .clone()
                 .unwrap_or_else(|| default_harness.clone());
 
             let harness_name = if registry_clone.get(&preferred).is_some() {

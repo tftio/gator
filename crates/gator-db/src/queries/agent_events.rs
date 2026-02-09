@@ -68,10 +68,7 @@ pub async fn list_events_for_task(
 
 /// Get all agent events for a given task across all attempts, ordered by
 /// attempt ASC then recorded_at ASC.
-pub async fn list_all_events_for_task(
-    pool: &PgPool,
-    task_id: Uuid,
-) -> Result<Vec<AgentEvent>> {
+pub async fn list_all_events_for_task(pool: &PgPool, task_id: Uuid) -> Result<Vec<AgentEvent>> {
     let events = sqlx::query_as::<_, AgentEvent>(
         "SELECT * FROM agent_events \
          WHERE task_id = $1 \
@@ -80,12 +77,7 @@ pub async fn list_all_events_for_task(
     .bind(task_id)
     .fetch_all(pool)
     .await
-    .with_context(|| {
-        format!(
-            "failed to list all agent events for task {}",
-            task_id
-        )
-    })?;
+    .with_context(|| format!("failed to list all agent events for task {}", task_id))?;
 
     Ok(events)
 }
@@ -169,11 +161,7 @@ pub async fn get_recent_events_for_task(
 }
 
 /// Count the number of agent events for a given task and attempt.
-pub async fn count_events_for_task(
-    pool: &PgPool,
-    task_id: Uuid,
-    attempt: i32,
-) -> Result<i64> {
+pub async fn count_events_for_task(pool: &PgPool, task_id: Uuid, attempt: i32) -> Result<i64> {
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM agent_events \
          WHERE task_id = $1 AND attempt = $2",

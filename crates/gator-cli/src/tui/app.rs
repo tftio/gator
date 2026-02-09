@@ -86,8 +86,7 @@ impl App {
                 self.gate_results =
                     gate_results::get_latest_gate_results(&self.pool, task_id).await?;
                 self.events =
-                    agent_events::get_recent_events_for_task(&self.pool, task_id, None, 20)
-                        .await?;
+                    agent_events::get_recent_events_for_task(&self.pool, task_id, None, 20).await?;
             }
             View::ReviewQueue => {
                 self.refresh_review_queue().await?;
@@ -246,10 +245,7 @@ impl App {
     /// Get the task ID of the currently selected checking task (if any).
     fn selected_checking_task_id(&self) -> Option<Uuid> {
         match &self.current_view {
-            View::ReviewQueue => self
-                .review_tasks
-                .get(self.selected_review)
-                .map(|rt| rt.id),
+            View::ReviewQueue => self.review_tasks.get(self.selected_review).map(|rt| rt.id),
             View::PlanDetail(_) => self
                 .tasks
                 .get(self.selected_task)
@@ -283,7 +279,6 @@ impl App {
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Tests

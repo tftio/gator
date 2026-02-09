@@ -19,10 +19,8 @@ use gator_core::plan::materialize_task;
 // ===========================================================================
 
 async fn create_temp_db() -> (PgPool, String) {
-    let database_url =
-        std::env::var("GATOR_DATABASE_URL").unwrap_or_else(|_| {
-            "postgresql://localhost:5432/gator".to_string()
-        });
+    let database_url = std::env::var("GATOR_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://localhost:5432/gator".to_string());
 
     let maint_url = match database_url.rfind('/') {
         Some(pos) => format!("{}/postgres", &database_url[..pos]),
@@ -65,10 +63,8 @@ async fn create_temp_db() -> (PgPool, String) {
 }
 
 async fn drop_temp_db(db_name: &str) {
-    let database_url =
-        std::env::var("GATOR_DATABASE_URL").unwrap_or_else(|_| {
-            "postgresql://localhost:5432/gator".to_string()
-        });
+    let database_url = std::env::var("GATOR_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://localhost:5432/gator".to_string());
 
     let maint_url = match database_url.rfind('/') {
         Some(pos) => format!("{}/postgres", &database_url[..pos]),
@@ -95,9 +91,17 @@ async fn drop_temp_db(db_name: &str) {
 
 /// Create a plan + task + invariant, returning (task_id, invariant_id).
 async fn create_test_fixtures(pool: &PgPool) -> (Uuid, Uuid) {
-    let plan = plan_db::insert_plan(pool, "retry-plan", "/tmp/test", "main", None, "claude-code", "worktree")
-        .await
-        .expect("insert plan");
+    let plan = plan_db::insert_plan(
+        pool,
+        "retry-plan",
+        "/tmp/test",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .expect("insert plan");
 
     let task = task_db::insert_task(
         pool,
@@ -301,10 +305,7 @@ async fn stderr_truncated_at_2048_bytes() {
         "full 3000-byte stderr should not appear in output"
     );
     // But a truncated version should be present.
-    assert!(
-        md.contains("..."),
-        "truncated stderr should end with ..."
-    );
+    assert!(md.contains("..."), "truncated stderr should end with ...");
 
     pool.close().await;
     drop_temp_db(&db_name).await;

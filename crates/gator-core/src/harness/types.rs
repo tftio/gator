@@ -196,9 +196,10 @@ mod tests {
                 "cargo test".to_string(),
             ],
             working_dir: PathBuf::from("/tmp/worktree"),
-            env_vars: HashMap::from([
-                ("GATOR_AGENT_TOKEN".to_string(), "gator_at_abc_0_deadbeef".to_string()),
-            ]),
+            env_vars: HashMap::from([(
+                "GATOR_AGENT_TOKEN".to_string(),
+                "gator_at_abc_0_deadbeef".to_string(),
+            )]),
         };
         let json = serde_json::to_string(&task).unwrap();
         let back: MaterializedTask = serde_json::from_str(&json).unwrap();

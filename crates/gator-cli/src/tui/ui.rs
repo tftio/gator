@@ -1,10 +1,10 @@
 //! TUI rendering using ratatui.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
-use ratatui::Frame;
 
 use gator_db::models::{PlanStatus, TaskStatus};
 
@@ -78,11 +78,7 @@ fn render_plan_list(f: &mut Frame, app: &App, area: Rect) {
         ],
     )
     .header(header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Plans "),
-    );
+    .block(Block::default().borders(Borders::ALL).title(" Plans "));
 
     f.render_widget(table, area);
 }
@@ -119,11 +115,8 @@ fn render_plan_detail(f: &mut Frame, app: &App, plan_id: uuid::Uuid, area: Rect)
         format!(" {plan_name}")
     };
 
-    let header = Paragraph::new(header_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Plan "),
-    );
+    let header =
+        Paragraph::new(header_text).block(Block::default().borders(Borders::ALL).title(" Plan "));
     f.render_widget(header, chunks[0]);
 
     // Task table.
@@ -168,11 +161,7 @@ fn render_plan_detail(f: &mut Frame, app: &App, plan_id: uuid::Uuid, area: Rect)
         ],
     )
     .header(task_header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Tasks "),
-    );
+    .block(Block::default().borders(Borders::ALL).title(" Tasks "));
 
     f.render_widget(task_table, chunks[1]);
 }
@@ -184,8 +173,8 @@ fn render_task_detail(f: &mut Frame, app: &App, task_id: uuid::Uuid, area: Rect)
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5), // task info
-            Constraint::Min(5),   // gate results
-            Constraint::Min(5),   // events
+            Constraint::Min(5),    // gate results
+            Constraint::Min(5),    // events
         ])
         .split(area);
 
@@ -200,7 +189,10 @@ fn render_task_detail(f: &mut Frame, app: &App, task_id: uuid::Uuid, area: Rect)
                 Span::styled("Status: ", Style::default().fg(Color::Yellow)),
                 Span::raw(t.status.to_string()),
                 Span::raw(format!("  Attempt: {}/{}", t.attempt, t.retry_max)),
-                Span::raw(format!("  Scope: {}  Gate: {}", t.scope_level, t.gate_policy)),
+                Span::raw(format!(
+                    "  Scope: {}  Gate: {}",
+                    t.scope_level, t.gate_policy
+                )),
             ]),
         ]
     } else {
@@ -268,10 +260,7 @@ fn render_task_detail(f: &mut Frame, app: &App, task_id: uuid::Uuid, area: Rect)
         .map(|ev| {
             let time = ev.recorded_at.format("%H:%M:%S").to_string();
             Line::from(vec![
-                Span::styled(
-                    format!("[{time}] "),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("[{time}] "), Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{} ", ev.event_type),
                     Style::default().fg(Color::Cyan),
@@ -328,10 +317,7 @@ fn render_review_queue(f: &mut Frame, app: &App, area: Rect) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!(
-                " Review Queue ({}) ",
-                app.review_tasks.len()
-            )),
+            .title(format!(" Review Queue ({}) ", app.review_tasks.len())),
     );
 
     f.render_widget(table, area);
@@ -340,34 +326,39 @@ fn render_review_queue(f: &mut Frame, app: &App, area: Rect) {
 fn render_help(f: &mut Frame, area: Rect) {
     let text = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "  Navigation",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("    j/Down    Move down"),
         Line::from("    k/Up      Move up"),
         Line::from("    Enter     Drill into selected"),
         Line::from("    Esc/q     Back / Quit"),
         Line::from("    Tab       Toggle Plans / Review Queue"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Actions", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "  Actions",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("    a         Approve selected task (if checking)"),
         Line::from("    r         Reject selected task (if checking)"),
         Line::from("    R         Retry selected task (if failed/escalated)"),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "  Other",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from("    ?         Show this help"),
         Line::from(""),
     ];
 
-    let help = Paragraph::new(text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Help "),
-    );
+    let help = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Help "));
     f.render_widget(help, area);
 }
 
@@ -386,10 +377,7 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
         .map(|pr| pr.progress.checking as usize)
         .sum();
 
-    let status_msg = app
-        .status_message
-        .as_deref()
-        .unwrap_or("");
+    let status_msg = app.status_message.as_deref().unwrap_or("");
 
     let bar = Line::from(vec![
         Span::styled(
@@ -403,7 +391,10 @@ fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Yellow),
             )
         } else {
-            Span::styled("no tasks awaiting review", Style::default().fg(Color::DarkGray))
+            Span::styled(
+                "no tasks awaiting review",
+                Style::default().fg(Color::DarkGray),
+            )
         },
         Span::raw("  "),
         Span::styled(status_msg, Style::default().fg(Color::Green)),

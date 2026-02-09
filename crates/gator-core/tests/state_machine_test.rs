@@ -18,9 +18,9 @@ use gator_db::models::TaskStatus;
 use gator_db::pool;
 use gator_db::queries::tasks as db;
 
+use gator_core::state::TaskStateMachine;
 use gator_core::state::dispatch;
 use gator_core::state::queries;
-use gator_core::state::TaskStateMachine;
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -111,9 +111,18 @@ async fn create_test_task(
     name: &str,
     retry_max: i32,
 ) -> gator_db::models::Task {
-    db::insert_task(pool, plan_id, name, "test description", "narrow", "auto", retry_max, None)
-        .await
-        .expect("failed to insert test task")
+    db::insert_task(
+        pool,
+        plan_id,
+        name,
+        "test description",
+        "narrow",
+        "auto",
+        retry_max,
+        None,
+    )
+    .await
+    .expect("failed to insert test task")
 }
 
 // ---------------------------------------------------------------------------
@@ -249,8 +258,14 @@ async fn failure_and_retry_lifecycle() {
     let t = db::get_task(&pool, task.id).await.unwrap().unwrap();
     assert_eq!(t.status, TaskStatus::Assigned);
     assert_eq!(t.attempt, 1, "attempt should be incremented");
-    assert!(t.started_at.is_none(), "started_at should be cleared on retry");
-    assert!(t.completed_at.is_none(), "completed_at should be cleared on retry");
+    assert!(
+        t.started_at.is_none(),
+        "started_at should be cleared on retry"
+    );
+    assert!(
+        t.completed_at.is_none(),
+        "completed_at should be cleared on retry"
+    );
 
     pool.close().await;
     drop_temp_db(&db_name).await;
@@ -400,13 +415,19 @@ async fn timestamps_set_correctly() {
         .await
         .unwrap();
     let t = db::get_task(&pool, task.id).await.unwrap().unwrap();
-    assert!(t.started_at.is_none(), "started_at should still be None after assign");
+    assert!(
+        t.started_at.is_none(),
+        "started_at should still be None after assign"
+    );
 
     // Start: should set started_at
     let before_start = chrono::Utc::now();
     dispatch::start_task(&pool, task.id).await.unwrap();
     let t = db::get_task(&pool, task.id).await.unwrap().unwrap();
-    assert!(t.started_at.is_some(), "started_at should be set after start");
+    assert!(
+        t.started_at.is_some(),
+        "started_at should be set after start"
+    );
     assert!(
         t.started_at.unwrap() >= before_start,
         "started_at should be >= the time before start"
@@ -419,7 +440,10 @@ async fn timestamps_set_correctly() {
     let before_pass = chrono::Utc::now();
     dispatch::pass_task(&pool, task.id).await.unwrap();
     let t = db::get_task(&pool, task.id).await.unwrap().unwrap();
-    assert!(t.completed_at.is_some(), "completed_at should be set after pass");
+    assert!(
+        t.completed_at.is_some(),
+        "completed_at should be set after pass"
+    );
     assert!(
         t.completed_at.unwrap() >= before_pass,
         "completed_at should be >= the time before pass"
@@ -447,8 +471,7 @@ async fn dependency_check_blocks_assignment() {
         .unwrap();
 
     // Try to assign main while dep is still pending
-    let result =
-        dispatch::assign_task(&pool, main_task.id, "h", Path::new("/tmp/wt")).await;
+    let result = dispatch::assign_task(&pool, main_task.id, "h", Path::new("/tmp/wt")).await;
     assert!(result.is_err(), "assign should fail when dep is pending");
     let err_msg = format!("{}", result.unwrap_err());
     assert!(
@@ -499,7 +522,10 @@ async fn get_ready_tasks_returns_correct_results() {
     let ready_ids: Vec<Uuid> = ready.iter().map(|t| t.id).collect();
     assert!(ready_ids.contains(&task_a.id), "A should be ready");
     assert!(ready_ids.contains(&task_c.id), "C should be ready");
-    assert!(!ready_ids.contains(&task_b.id), "B should not be ready (dep A pending)");
+    assert!(
+        !ready_ids.contains(&task_b.id),
+        "B should not be ready (dep A pending)"
+    );
 
     // Pass A
     dispatch::assign_task(&pool, task_a.id, "h", Path::new("/tmp/wt"))
@@ -512,9 +538,15 @@ async fn get_ready_tasks_returns_correct_results() {
     // Now B should be ready
     let ready = queries::get_ready_tasks(&pool, plan_id).await.unwrap();
     let ready_ids: Vec<Uuid> = ready.iter().map(|t| t.id).collect();
-    assert!(ready_ids.contains(&task_b.id), "B should be ready after A passed");
+    assert!(
+        ready_ids.contains(&task_b.id),
+        "B should be ready after A passed"
+    );
     assert!(ready_ids.contains(&task_c.id), "C should still be ready");
-    assert!(!ready_ids.contains(&task_a.id), "A should not be ready (status=passed, not pending)");
+    assert!(
+        !ready_ids.contains(&task_a.id),
+        "A should not be ready (status=passed, not pending)"
+    );
 
     pool.close().await;
     drop_temp_db(&db_name).await;
@@ -579,13 +611,9 @@ async fn concurrent_transitions_handled_safely() {
     // Launch two concurrent start_task calls
     let pool2 = pool.clone();
     let task_id = task.id;
-    let handle1 = tokio::spawn(async move {
-        dispatch::start_task(&pool2, task_id).await
-    });
+    let handle1 = tokio::spawn(async move { dispatch::start_task(&pool2, task_id).await });
     let pool3 = pool.clone();
-    let handle2 = tokio::spawn(async move {
-        dispatch::start_task(&pool3, task_id).await
-    });
+    let handle2 = tokio::spawn(async move { dispatch::start_task(&pool3, task_id).await });
 
     let result1 = handle1.await.unwrap();
     let result2 = handle2.await.unwrap();

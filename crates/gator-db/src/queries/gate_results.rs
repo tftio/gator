@@ -87,12 +87,7 @@ pub async fn get_latest_gate_results(
     .bind(task_id)
     .fetch_all(pool)
     .await
-    .with_context(|| {
-        format!(
-            "failed to get latest gate results for task {}",
-            task_id
-        )
-    })?;
+    .with_context(|| format!("failed to get latest gate results for task {}", task_id))?;
 
     Ok(results)
 }

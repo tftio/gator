@@ -26,8 +26,8 @@ pub async fn run_merge(pool: &PgPool, plan_id_str: &str, dry_run: bool) -> Resul
         );
     }
 
-    let worktree_manager = WorktreeManager::new(&plan.project_path, None)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let worktree_manager =
+        WorktreeManager::new(&plan.project_path, None).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let tasks = task_db::list_tasks_for_plan(pool, plan_id).await?;
 
@@ -42,7 +42,11 @@ pub async fn run_merge(pool: &PgPool, plan_id_str: &str, dry_run: bool) -> Resul
             .map_err(|e| anyhow::anyhow!("failed to checkout {}: {e}", plan.base_branch))?;
     }
 
-    println!("Merging {} task branch(es) into {}", ordered.len(), plan.base_branch);
+    println!(
+        "Merging {} task branch(es) into {}",
+        ordered.len(),
+        plan.base_branch
+    );
 
     let mut merged = 0;
     for task in &ordered {
@@ -81,7 +85,10 @@ pub async fn run_merge(pool: &PgPool, plan_id_str: &str, dry_run: bool) -> Resul
     if dry_run {
         println!("\nDry run complete: {merged} branch(es) would be merged.");
     } else {
-        println!("\nMerge complete: {merged} branch(es) merged into {}.", plan.base_branch);
+        println!(
+            "\nMerge complete: {merged} branch(es) merged into {}.",
+            plan.base_branch
+        );
     }
 
     Ok(())

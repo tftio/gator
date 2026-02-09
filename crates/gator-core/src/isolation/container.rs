@@ -39,7 +39,13 @@ impl ContainerIsolation {
         // Sanitize names for Docker container naming (alphanumeric + hyphens).
         let sanitize = |s: &str| -> String {
             s.chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
                 .collect()
         };
         format!("gator-{}-{}", sanitize(plan_name), sanitize(task_name))

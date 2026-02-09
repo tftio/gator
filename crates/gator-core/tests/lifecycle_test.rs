@@ -25,10 +25,10 @@ use gator_db::queries::tasks as task_db;
 
 use std::sync::Arc;
 
-use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::Harness;
+use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::isolation::{Isolation, worktree::WorktreeIsolation};
-use gator_core::lifecycle::{run_agent_lifecycle, LifecycleConfig, LifecycleResult};
+use gator_core::lifecycle::{LifecycleConfig, LifecycleResult, run_agent_lifecycle};
 use gator_core::token::TokenConfig;
 use gator_core::worktree::WorktreeManager;
 
@@ -167,8 +167,7 @@ fn create_temp_git_repo() -> (tempfile::TempDir, PathBuf) {
     run(&["init"]);
     run(&["config", "user.email", "test@gator.dev"]);
     run(&["config", "user.name", "Gator Test"]);
-    std::fs::write(repo_path.join("README.md"), "# Test repo\n")
-        .expect("failed to write README");
+    std::fs::write(repo_path.join("README.md"), "# Test repo\n").expect("failed to write README");
     run(&["add", "."]);
     run(&["commit", "-m", "Initial commit"]);
 
@@ -422,10 +421,7 @@ async fn happy_path_lifecycle_passes() {
     assert_eq!(result, LifecycleResult::Passed);
 
     // Verify task is now passed.
-    let updated = task_db::get_task(pool, task.id)
-        .await
-        .unwrap()
-        .unwrap();
+    let updated = task_db::get_task(pool, task.id).await.unwrap().unwrap();
     assert_eq!(updated.status, TaskStatus::Passed);
 
     harness.teardown().await;
@@ -438,10 +434,7 @@ async fn failing_invariant_with_retries_returns_failed_can_retry() {
 
     let (_plan_id, task) = setup_failing_task(pool, &harness.repo_path, 3).await;
 
-    let mock = MockHarness::completing(
-        vec![AgentEvent::Completed],
-        false,
-    );
+    let mock = MockHarness::completing(vec![AgentEvent::Completed], false);
 
     let isolation = harness.isolation();
     let result = run_agent_lifecycle(
@@ -460,10 +453,7 @@ async fn failing_invariant_with_retries_returns_failed_can_retry() {
 
     assert_eq!(result, LifecycleResult::FailedCanRetry);
 
-    let updated = task_db::get_task(pool, task.id)
-        .await
-        .unwrap()
-        .unwrap();
+    let updated = task_db::get_task(pool, task.id).await.unwrap().unwrap();
     assert_eq!(updated.status, TaskStatus::Failed);
 
     harness.teardown().await;
@@ -476,10 +466,7 @@ async fn failing_invariant_no_retries_returns_failed_no_retry() {
 
     let (_plan_id, task) = setup_failing_task(pool, &harness.repo_path, 0).await;
 
-    let mock = MockHarness::completing(
-        vec![AgentEvent::Completed],
-        false,
-    );
+    let mock = MockHarness::completing(vec![AgentEvent::Completed], false);
 
     let isolation = harness.isolation();
     let result = run_agent_lifecycle(
@@ -528,10 +515,7 @@ async fn timeout_returns_timed_out() {
     assert_eq!(result, LifecycleResult::TimedOut);
 
     // Task should be failed after timeout.
-    let updated = task_db::get_task(pool, task.id)
-        .await
-        .unwrap()
-        .unwrap();
+    let updated = task_db::get_task(pool, task.id).await.unwrap().unwrap();
     assert_eq!(updated.status, TaskStatus::Failed);
 
     harness.teardown().await;

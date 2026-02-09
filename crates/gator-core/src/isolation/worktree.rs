@@ -99,10 +99,7 @@ mod tests {
             .expect("create_workspace failed");
 
         assert!(info.path.exists());
-        assert_eq!(
-            info.branch.as_deref(),
-            Some("gator/test-plan/test-task")
-        );
+        assert_eq!(info.branch.as_deref(), Some("gator/test-plan/test-task"));
         assert!(info.container_id.is_none());
 
         isolation

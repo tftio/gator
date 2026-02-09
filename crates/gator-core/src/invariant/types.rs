@@ -103,7 +103,10 @@ mod tests {
             .threshold(80.0)
             .scope(InvariantScope::Global);
 
-        assert_eq!(def.description.as_deref(), Some("Check code coverage meets threshold"));
+        assert_eq!(
+            def.description.as_deref(),
+            Some("Check code coverage meets threshold")
+        );
         assert_eq!(def.args, vec!["tarpaulin", "--workspace"]);
         assert_eq!(def.expected_exit_code, 0);
         assert_eq!(def.threshold, Some(80.0));

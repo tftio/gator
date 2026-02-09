@@ -18,8 +18,8 @@ impl DbConfig {
     ///
     /// Priority: `GATOR_DATABASE_URL` env var, then the compile-time default.
     pub fn from_env() -> Self {
-        let database_url = env::var("GATOR_DATABASE_URL")
-            .unwrap_or_else(|_| Self::DEFAULT_URL.to_owned());
+        let database_url =
+            env::var("GATOR_DATABASE_URL").unwrap_or_else(|_| Self::DEFAULT_URL.to_owned());
         Self { database_url }
     }
 
@@ -81,7 +81,10 @@ mod tests {
     #[test]
     fn maintenance_url_replaces_db() {
         let cfg = DbConfig::new("postgresql://localhost:5432/gator");
-        assert_eq!(cfg.maintenance_url(), "postgresql://localhost:5432/postgres");
+        assert_eq!(
+            cfg.maintenance_url(),
+            "postgresql://localhost:5432/postgres"
+        );
     }
 
     #[test]

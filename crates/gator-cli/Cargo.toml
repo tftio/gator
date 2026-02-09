@@ -1,5 +1,6 @@
 [package]
 name = "gator-cli"
+description.workspace = true
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -27,6 +28,7 @@ hex.workspace = true
 rand.workspace = true
 serde = { workspace = true, features = ["derive"] }
 toml.workspace = true
+clap_complete.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tokio-util.workspace = true

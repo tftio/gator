@@ -274,12 +274,12 @@ gate = "auto"
         assert_eq!(plan.plan.name, "Add user authentication");
         assert_eq!(plan.tasks.len(), 4);
         // Verify the diamond DAG structure.
-        assert!(plan.tasks[0].depends_on.is_empty(), "define-types has no deps");
+        assert!(
+            plan.tasks[0].depends_on.is_empty(),
+            "define-types has no deps"
+        );
         assert_eq!(plan.tasks[1].depends_on, vec!["define-types"]);
         assert_eq!(plan.tasks[2].depends_on, vec!["define-types"]);
-        assert_eq!(
-            plan.tasks[3].depends_on,
-            vec!["impl-jwt", "impl-password"],
-        );
+        assert_eq!(plan.tasks[3].depends_on, vec!["impl-jwt", "impl-password"],);
     }
 }

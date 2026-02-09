@@ -50,38 +50,32 @@ pub async fn insert_invariant(pool: &PgPool, new: &NewInvariant<'_>) -> Result<I
 
 /// Fetch an invariant by its UUID.
 pub async fn get_invariant(pool: &PgPool, id: Uuid) -> Result<Option<Invariant>> {
-    let invariant = sqlx::query_as::<_, Invariant>(
-        "SELECT * FROM invariants WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch invariant")?;
+    let invariant = sqlx::query_as::<_, Invariant>("SELECT * FROM invariants WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .context("failed to fetch invariant")?;
 
     Ok(invariant)
 }
 
 /// Fetch an invariant by its unique name.
 pub async fn get_invariant_by_name(pool: &PgPool, name: &str) -> Result<Option<Invariant>> {
-    let invariant = sqlx::query_as::<_, Invariant>(
-        "SELECT * FROM invariants WHERE name = $1",
-    )
-    .bind(name)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("failed to fetch invariant by name {:?}", name))?;
+    let invariant = sqlx::query_as::<_, Invariant>("SELECT * FROM invariants WHERE name = $1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("failed to fetch invariant by name {:?}", name))?;
 
     Ok(invariant)
 }
 
 /// List all invariants, ordered by name.
 pub async fn list_invariants(pool: &PgPool) -> Result<Vec<Invariant>> {
-    let invariants = sqlx::query_as::<_, Invariant>(
-        "SELECT * FROM invariants ORDER BY name",
-    )
-    .fetch_all(pool)
-    .await
-    .context("failed to list invariants")?;
+    let invariants = sqlx::query_as::<_, Invariant>("SELECT * FROM invariants ORDER BY name")
+        .fetch_all(pool)
+        .await
+        .context("failed to list invariants")?;
 
     Ok(invariants)
 }
@@ -93,13 +87,12 @@ pub async fn list_invariants(pool: &PgPool) -> Result<Vec<Invariant>> {
 /// references).
 pub async fn delete_invariant(pool: &PgPool, id: Uuid) -> Result<()> {
     // Check whether the invariant is linked to any tasks.
-    let linked: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM task_invariants WHERE invariant_id = $1",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .context("failed to check invariant task links")?;
+    let linked: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM task_invariants WHERE invariant_id = $1")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .context("failed to check invariant task links")?;
 
     if linked.0 > 0 {
         anyhow::bail!(
@@ -138,11 +131,7 @@ pub async fn get_invariants_for_task(pool: &PgPool, task_id: Uuid) -> Result<Vec
 }
 
 /// Link a task to an invariant. Idempotent (ON CONFLICT DO NOTHING).
-pub async fn link_task_invariant(
-    pool: &PgPool,
-    task_id: Uuid,
-    invariant_id: Uuid,
-) -> Result<()> {
+pub async fn link_task_invariant(pool: &PgPool, task_id: Uuid, invariant_id: Uuid) -> Result<()> {
     sqlx::query(
         "INSERT INTO task_invariants (task_id, invariant_id) \
          VALUES ($1, $2) \

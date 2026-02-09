@@ -5,6 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+description = "CLI for orchestrating fleets of LLM coding agents"
 license = "MIT"
 rust-version = "1.85"
 
@@ -46,5 +47,7 @@ hex = "0.4"
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
+# Shell completions
+clap_complete = "4"
 # Testing
 tempfile = "3"

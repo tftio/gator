@@ -105,9 +105,7 @@ pub async fn create_plan_from_toml(
                     .bind(inv_name)
                     .fetch_optional(&mut *tx)
                     .await
-                    .with_context(|| {
-                        format!("failed to look up invariant {:?}", inv_name)
-                    })?;
+                    .with_context(|| format!("failed to look up invariant {:?}", inv_name))?;
 
             match inv_row {
                 Some((inv_id,)) => {
@@ -142,10 +140,7 @@ pub async fn create_plan_from_toml(
 }
 
 /// Fetch a plan and all its tasks.
-pub async fn get_plan_with_tasks(
-    pool: &PgPool,
-    plan_id: Uuid,
-) -> Result<(Plan, Vec<Task>)> {
+pub async fn get_plan_with_tasks(pool: &PgPool, plan_id: Uuid) -> Result<(Plan, Vec<Task>)> {
     let plan = plan_queries::get_plan(pool, plan_id)
         .await?
         .with_context(|| format!("plan {plan_id} not found"))?;

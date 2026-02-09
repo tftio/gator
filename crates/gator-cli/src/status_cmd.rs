@@ -20,8 +20,8 @@ pub async fn run_status(pool: &PgPool, plan_id_str: Option<&str>) -> Result<()> 
 
 /// Show detailed status for a single plan.
 async fn run_plan_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
-    let plan_id = Uuid::parse_str(plan_id_str)
-        .with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
+    let plan_id =
+        Uuid::parse_str(plan_id_str).with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
 
     let plan = plan_db::get_plan(pool, plan_id)
         .await?
@@ -33,7 +33,10 @@ async fn run_plan_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
         println!("Approved: {}", approved_at.format("%Y-%m-%d %H:%M:%S UTC"));
     }
     if let Some(completed_at) = plan.completed_at {
-        println!("Completed: {}", completed_at.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "Completed: {}",
+            completed_at.format("%Y-%m-%d %H:%M:%S UTC")
+        );
     }
     if let Some(budget) = plan.token_budget {
         println!("Token budget: {budget}");

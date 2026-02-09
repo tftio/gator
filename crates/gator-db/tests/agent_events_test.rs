@@ -6,19 +6,15 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
-use gator_db::queries::agent_events::{
-    self, NewAgentEvent,
-};
+use gator_db::queries::agent_events::{self, NewAgentEvent};
 
 // ===========================================================================
 // Test harness
 // ===========================================================================
 
 async fn create_temp_db() -> (PgPool, String) {
-    let database_url =
-        std::env::var("GATOR_DATABASE_URL").unwrap_or_else(|_| {
-            "postgresql://localhost:5432/gator".to_string()
-        });
+    let database_url = std::env::var("GATOR_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://localhost:5432/gator".to_string());
 
     // Connect to maintenance database to create temp DB.
     let maint_url = match database_url.rfind('/') {
@@ -62,10 +58,8 @@ async fn create_temp_db() -> (PgPool, String) {
 }
 
 async fn drop_temp_db(db_name: &str) {
-    let database_url =
-        std::env::var("GATOR_DATABASE_URL").unwrap_or_else(|_| {
-            "postgresql://localhost:5432/gator".to_string()
-        });
+    let database_url = std::env::var("GATOR_DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://localhost:5432/gator".to_string());
 
     let maint_url = match database_url.rfind('/') {
         Some(pos) => format!("{}/postgres", &database_url[..pos]),
@@ -280,7 +274,14 @@ async fn multiple_event_types_insert_correctly() {
     let (pool, db_name) = create_temp_db().await;
     let task_id = create_test_task(&pool).await;
 
-    let types = ["message", "tool_call", "tool_result", "token_usage", "error", "completed"];
+    let types = [
+        "message",
+        "tool_call",
+        "tool_result",
+        "token_usage",
+        "error",
+        "completed",
+    ];
     for event_type in &types {
         let new = NewAgentEvent {
             task_id,

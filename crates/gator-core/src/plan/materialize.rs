@@ -34,8 +34,14 @@ pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
     // Plan header.
     out.push_str("[plan]\n");
     out.push_str(&format!("name = {}\n", toml_quote(&plan.name)));
-    out.push_str(&format!("base_branch = {}\n", toml_quote(&plan.base_branch)));
-    out.push_str(&format!("default_harness = {}\n", toml_quote(&plan.default_harness)));
+    out.push_str(&format!(
+        "base_branch = {}\n",
+        toml_quote(&plan.base_branch)
+    ));
+    out.push_str(&format!(
+        "default_harness = {}\n",
+        toml_quote(&plan.default_harness)
+    ));
     out.push_str(&format!("isolation = {}\n", toml_quote(&plan.isolation)));
 
     for task in &tasks {
@@ -46,13 +52,22 @@ pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
             "description = {}\n",
             toml_quote(&task.description)
         ));
-        out.push_str(&format!("scope = {}\n", toml_quote(&task.scope_level.to_string())));
-        out.push_str(&format!("gate = {}\n", toml_quote(&task.gate_policy.to_string())));
+        out.push_str(&format!(
+            "scope = {}\n",
+            toml_quote(&task.scope_level.to_string())
+        ));
+        out.push_str(&format!(
+            "gate = {}\n",
+            toml_quote(&task.gate_policy.to_string())
+        ));
         out.push_str(&format!("retry_max = {}\n", task.retry_max));
         if let Some(ref harness) = task.requested_harness {
             out.push_str(&format!("harness = {}\n", toml_quote(harness)));
         }
-        out.push_str(&format!("status = {}\n", toml_quote(&task.status.to_string())));
+        out.push_str(&format!(
+            "status = {}\n",
+            toml_quote(&task.status.to_string())
+        ));
 
         // Dependencies.
         let dep_names = task_queries::get_task_dependency_names(pool, task.id).await?;
@@ -168,11 +183,7 @@ pub async fn materialize_task(pool: &PgPool, task_id: Uuid) -> Result<String> {
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "signal".to_string());
 
-                let stderr_snippet = failure
-                    .stderr
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_string();
+                let stderr_snippet = failure.stderr.as_deref().unwrap_or("").to_string();
                 let stderr_truncated = truncate_feedback_snippet(&stderr_snippet, 2048);
 
                 out.push_str(&format!("### {}\n\n", inv_name));
@@ -196,19 +207,18 @@ async fn get_dependency_status_by_name(
     plan_id: Uuid,
     task_name: &str,
 ) -> Result<String> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT status::text FROM tasks WHERE plan_id = $1 AND name = $2",
-    )
-    .bind(plan_id)
-    .bind(task_name)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| {
-        format!(
-            "failed to look up dependency status for task {:?}",
-            task_name
-        )
-    })?;
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT status::text FROM tasks WHERE plan_id = $1 AND name = $2")
+            .bind(plan_id)
+            .bind(task_name)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to look up dependency status for task {:?}",
+                    task_name
+                )
+            })?;
 
     match row {
         Some((status,)) => Ok(status),
@@ -252,8 +262,8 @@ fn toml_quote(s: &str) -> String {
 /// `#[serde(default)]` so the extra `status` field is simply ignored by the
 /// TOML deserializer if `deny_unknown_fields` is not set.
 pub fn parse_materialized(content: &str) -> Result<PlanToml> {
-    let plan: PlanToml = toml::from_str(content)
-        .context("failed to parse materialized plan TOML")?;
+    let plan: PlanToml =
+        toml::from_str(content).context("failed to parse materialized plan TOML")?;
     Ok(plan)
 }
 

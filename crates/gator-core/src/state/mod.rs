@@ -9,7 +9,7 @@ pub mod queries;
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -193,13 +193,7 @@ impl TaskStateMachine {
         worktree_path: &Path,
     ) -> Result<()> {
         Self::check_dependencies(pool, task_id).await?;
-        db::assign_task_metadata(
-            pool,
-            task_id,
-            harness,
-            &worktree_path.to_string_lossy(),
-        )
-        .await?;
+        db::assign_task_metadata(pool, task_id, harness, &worktree_path.to_string_lossy()).await?;
         Self::transition(pool, task_id, TaskStatus::Pending, TaskStatus::Assigned).await
     }
 }

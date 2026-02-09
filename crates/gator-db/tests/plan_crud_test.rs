@@ -90,9 +90,17 @@ async fn drop_temp_db(db_name: &str) {
 async fn insert_and_get_plan() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "test-plan", "/tmp/project", "main", None, "claude-code", "worktree")
-        .await
-        .expect("insert_plan should succeed");
+    let plan = plans::insert_plan(
+        &pool,
+        "test-plan",
+        "/tmp/project",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .expect("insert_plan should succeed");
 
     assert_eq!(plan.name, "test-plan");
     assert_eq!(plan.project_path, "/tmp/project");
@@ -132,12 +140,28 @@ async fn get_plan_returns_none_for_missing_id() {
 async fn list_plans_returns_all() {
     let (pool, db_name) = create_temp_db().await;
 
-    plans::insert_plan(&pool, "plan-a", "/tmp/a", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
-    plans::insert_plan(&pool, "plan-b", "/tmp/b", "develop", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    plans::insert_plan(
+        &pool,
+        "plan-a",
+        "/tmp/a",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
+    plans::insert_plan(
+        &pool,
+        "plan-b",
+        "/tmp/b",
+        "develop",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     let all = plans::list_plans(&pool).await.unwrap();
     assert_eq!(all.len(), 2);
@@ -150,9 +174,17 @@ async fn list_plans_returns_all() {
 async fn update_plan_status_succeeds() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "status-test", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "status-test",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(plan.status, PlanStatus::Draft);
 
@@ -186,9 +218,17 @@ async fn update_plan_status_fails_for_missing_plan() {
 async fn insert_and_get_task() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "task-test-plan", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "task-test-plan",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     let task = tasks::insert_task(
         &pool,
@@ -227,22 +267,58 @@ async fn insert_and_get_task() {
 async fn list_tasks_for_plan_returns_correct_tasks() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan_a = plans::insert_plan(&pool, "plan-a", "/tmp/a", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
-    let plan_b = plans::insert_plan(&pool, "plan-b", "/tmp/b", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan_a = plans::insert_plan(
+        &pool,
+        "plan-a",
+        "/tmp/a",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
+    let plan_b = plans::insert_plan(
+        &pool,
+        "plan-b",
+        "/tmp/b",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
-    tasks::insert_task(&pool, plan_a.id, "a-task-1", "desc", "narrow", "auto", 3, None)
-        .await
-        .unwrap();
-    tasks::insert_task(&pool, plan_a.id, "a-task-2", "desc", "medium", "human_review", 2, None)
-        .await
-        .unwrap();
-    tasks::insert_task(&pool, plan_b.id, "b-task-1", "desc", "broad", "human_approve", 1, None)
-        .await
-        .unwrap();
+    tasks::insert_task(
+        &pool, plan_a.id, "a-task-1", "desc", "narrow", "auto", 3, None,
+    )
+    .await
+    .unwrap();
+    tasks::insert_task(
+        &pool,
+        plan_a.id,
+        "a-task-2",
+        "desc",
+        "medium",
+        "human_review",
+        2,
+        None,
+    )
+    .await
+    .unwrap();
+    tasks::insert_task(
+        &pool,
+        plan_b.id,
+        "b-task-1",
+        "desc",
+        "broad",
+        "human_approve",
+        1,
+        None,
+    )
+    .await
+    .unwrap();
 
     let plan_a_tasks = tasks::list_tasks_for_plan(&pool, plan_a.id).await.unwrap();
     assert_eq!(plan_a_tasks.len(), 2);
@@ -258,7 +334,9 @@ async fn list_tasks_for_plan_returns_correct_tasks() {
 async fn update_task_status_succeeds() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "p", "/tmp", "main", None, "claude-code", "worktree").await.unwrap();
+    let plan = plans::insert_plan(&pool, "p", "/tmp", "main", None, "claude-code", "worktree")
+        .await
+        .unwrap();
     let task = tasks::insert_task(&pool, plan.id, "t", "d", "narrow", "auto", 3, None)
         .await
         .unwrap();
@@ -278,9 +356,17 @@ async fn update_task_status_succeeds() {
 async fn task_dependencies_roundtrip() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "dep-test", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "dep-test",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     let task_a = tasks::insert_task(&pool, plan.id, "a", "first", "narrow", "auto", 3, None)
         .await
@@ -303,16 +389,22 @@ async fn task_dependencies_roundtrip() {
         .await
         .unwrap();
 
-    let b_deps = tasks::get_task_dependencies(&pool, task_b.id).await.unwrap();
+    let b_deps = tasks::get_task_dependencies(&pool, task_b.id)
+        .await
+        .unwrap();
     assert_eq!(b_deps, vec![task_a.id]);
 
-    let mut c_deps = tasks::get_task_dependencies(&pool, task_c.id).await.unwrap();
+    let mut c_deps = tasks::get_task_dependencies(&pool, task_c.id)
+        .await
+        .unwrap();
     c_deps.sort();
     let mut expected = vec![task_a.id, task_b.id];
     expected.sort();
     assert_eq!(c_deps, expected);
 
-    let a_deps = tasks::get_task_dependencies(&pool, task_a.id).await.unwrap();
+    let a_deps = tasks::get_task_dependencies(&pool, task_a.id)
+        .await
+        .unwrap();
     assert!(a_deps.is_empty());
 
     pool.close().await;
@@ -323,7 +415,17 @@ async fn task_dependencies_roundtrip() {
 async fn task_dependency_is_idempotent() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "idem", "/tmp", "main", None, "claude-code", "worktree").await.unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "idem",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
     let a = tasks::insert_task(&pool, plan.id, "a", "d", "narrow", "auto", 3, None)
         .await
         .unwrap();
@@ -332,8 +434,12 @@ async fn task_dependency_is_idempotent() {
         .unwrap();
 
     // Insert same dependency twice -- should not error.
-    tasks::insert_task_dependency(&pool, b.id, a.id).await.unwrap();
-    tasks::insert_task_dependency(&pool, b.id, a.id).await.unwrap();
+    tasks::insert_task_dependency(&pool, b.id, a.id)
+        .await
+        .unwrap();
+    tasks::insert_task_dependency(&pool, b.id, a.id)
+        .await
+        .unwrap();
 
     let deps = tasks::get_task_dependencies(&pool, b.id).await.unwrap();
     assert_eq!(deps.len(), 1);
@@ -346,9 +452,17 @@ async fn task_dependency_is_idempotent() {
 async fn link_task_invariant_roundtrip() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "inv-link", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "inv-link",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
     let task = tasks::insert_task(&pool, plan.id, "t", "d", "narrow", "auto", 3, None)
         .await
         .unwrap();
@@ -406,9 +520,17 @@ async fn link_task_invariant_roundtrip() {
 async fn update_plan_status_to_completed_sets_completed_at() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "ts-completed", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "ts-completed",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     assert!(plan.completed_at.is_none());
 
@@ -431,9 +553,17 @@ async fn update_plan_status_to_completed_sets_completed_at() {
 async fn update_plan_status_to_failed_sets_completed_at() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "ts-failed", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "ts-failed",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     plans::update_plan_status(&pool, plan.id, PlanStatus::Failed)
         .await
@@ -454,9 +584,17 @@ async fn update_plan_status_to_failed_sets_completed_at() {
 async fn update_plan_status_to_approved_sets_approved_at() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "ts-approved", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "ts-approved",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     assert!(plan.approved_at.is_none());
 
@@ -480,9 +618,17 @@ async fn update_plan_status_does_not_overwrite_existing_timestamps() {
     let (pool, db_name) = create_temp_db().await;
 
     // Use approve_plan to set approved_at via the explicit path.
-    let plan = plans::insert_plan(&pool, "ts-no-overwrite", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "ts-no-overwrite",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
     let approved = plans::approve_plan(&pool, plan.id).await.unwrap();
     let original_approved_at = approved.approved_at.unwrap();
 
@@ -509,9 +655,17 @@ async fn update_plan_status_does_not_overwrite_existing_timestamps() {
 async fn update_plan_status_to_running_does_not_set_timestamps() {
     let (pool, db_name) = create_temp_db().await;
 
-    let plan = plans::insert_plan(&pool, "ts-running", "/tmp", "main", None, "claude-code", "worktree")
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "ts-running",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+    )
+    .await
+    .unwrap();
 
     plans::update_plan_status(&pool, plan.id, PlanStatus::Running)
         .await

@@ -37,20 +37,16 @@ use crate::Commands;
 /// - An operator-only command was attempted
 /// - A DB query fails
 /// - An invariant check fails (for `gator check`)
-pub async fn run_agent_mode(
-    command: Commands,
-    pool: Option<&PgPool>,
-) -> Result<()> {
+pub async fn run_agent_mode(command: Commands, pool: Option<&PgPool>) -> Result<()> {
     // Validate the token first.
-    let token_config = TokenConfig::from_env()
-        .context("GATOR_TOKEN_SECRET must be set for agent mode")?;
-    let claims = guard::require_agent_mode(&token_config)
-        .map_err(|e| match e {
-            GuardError::InvalidToken(inner) => {
-                anyhow::anyhow!("invalid agent token: {inner}")
-            }
-            other => anyhow::anyhow!("{other}"),
-        })?;
+    let token_config =
+        TokenConfig::from_env().context("GATOR_TOKEN_SECRET must be set for agent mode")?;
+    let claims = guard::require_agent_mode(&token_config).map_err(|e| match e {
+        GuardError::InvalidToken(inner) => {
+            anyhow::anyhow!("invalid agent token: {inner}")
+        }
+        other => anyhow::anyhow!("{other}"),
+    })?;
 
     match command {
         Commands::Task => cmd_task(&claims, pool).await,
@@ -246,10 +242,7 @@ async fn cmd_check(claims: &TokenClaims, pool: Option<&PgPool>) -> Result<()> {
 }
 
 /// Execute a single invariant in the given working directory.
-fn run_invariant_check(
-    inv: &Invariant,
-    cwd: &std::path::Path,
-) -> Result<InvariantCheckResult> {
+fn run_invariant_check(inv: &Invariant, cwd: &std::path::Path) -> Result<InvariantCheckResult> {
     let start = Instant::now();
 
     let output = std::process::Command::new(&inv.command)
@@ -258,7 +251,12 @@ fn run_invariant_check(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .with_context(|| format!("failed to execute invariant '{}': {}", inv.name, inv.command))?;
+        .with_context(|| {
+            format!(
+                "failed to execute invariant '{}': {}",
+                inv.name, inv.command
+            )
+        })?;
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let exit_code = output.status.code().unwrap_or(-1);
@@ -298,11 +296,7 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 // -----------------------------------------------------------------------
 
 /// `gator progress "message"` -- record a progress event.
-async fn cmd_progress(
-    claims: &TokenClaims,
-    pool: Option<&PgPool>,
-    message: &str,
-) -> Result<()> {
+async fn cmd_progress(claims: &TokenClaims, pool: Option<&PgPool>, message: &str) -> Result<()> {
     let pool = require_db(pool)?;
 
     let payload = serde_json::json!({
@@ -403,7 +397,10 @@ mod tests {
 
         // Verify the guard detects agent mode.
         let result = guard::require_operator_mode();
-        assert!(result.is_err(), "operator mode should be blocked when token is set");
+        assert!(
+            result.is_err(),
+            "operator mode should be blocked when token is set"
+        );
 
         unsafe { std::env::remove_var(AGENT_TOKEN_ENV) };
     }
@@ -416,7 +413,10 @@ mod tests {
         unsafe { std::env::remove_var(AGENT_TOKEN_ENV) };
 
         let result = guard::require_operator_mode();
-        assert!(result.is_ok(), "operator mode should be allowed when no token");
+        assert!(
+            result.is_ok(),
+            "operator mode should be allowed when no token"
+        );
     }
 
     #[test]

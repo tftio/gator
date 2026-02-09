@@ -19,10 +19,7 @@ use crate::InvariantCommands;
 // -----------------------------------------------------------------------
 
 /// Dispatch an `InvariantCommands` variant to the appropriate handler.
-pub async fn run_invariant_command(
-    command: InvariantCommands,
-    pool: &PgPool,
-) -> Result<()> {
+pub async fn run_invariant_command(command: InvariantCommands, pool: &PgPool) -> Result<()> {
     match command {
         InvariantCommands::Add {
             name,
@@ -35,17 +32,20 @@ pub async fn run_invariant_command(
             scope,
             timeout,
         } => {
-            cmd_add(pool, AddParams {
-                name,
-                kind,
-                command: cmd,
-                args,
-                description,
-                expected_exit_code,
-                threshold,
-                scope,
-                timeout,
-            })
+            cmd_add(
+                pool,
+                AddParams {
+                    name,
+                    kind,
+                    command: cmd,
+                    args,
+                    description,
+                    expected_exit_code,
+                    threshold,
+                    scope,
+                    timeout,
+                },
+            )
             .await
         }
         InvariantCommands::List { verbose } => cmd_list(pool, verbose).await,
@@ -489,27 +489,15 @@ mod tests {
 
     #[test]
     fn clap_add_missing_kind_fails() {
-        let result = TestCli::try_parse_from([
-            "gator",
-            "invariant",
-            "add",
-            "my_check",
-            "--command",
-            "echo",
-        ]);
+        let result =
+            TestCli::try_parse_from(["gator", "invariant", "add", "my_check", "--command", "echo"]);
         assert!(result.is_err(), "missing --kind should fail");
     }
 
     #[test]
     fn clap_add_missing_command_fails() {
-        let result = TestCli::try_parse_from([
-            "gator",
-            "invariant",
-            "add",
-            "my_check",
-            "--kind",
-            "custom",
-        ]);
+        let result =
+            TestCli::try_parse_from(["gator", "invariant", "add", "my_check", "--kind", "custom"]);
         assert!(result.is_err(), "missing --command should fail");
     }
 
@@ -529,8 +517,7 @@ mod tests {
 
     #[test]
     fn clap_parses_list_default() {
-        let cli = TestCli::try_parse_from(["gator", "invariant", "list"])
-            .expect("should parse");
+        let cli = TestCli::try_parse_from(["gator", "invariant", "list"]).expect("should parse");
         match cli.command {
             TestCommands::Invariant {
                 command: InvariantCommands::List { verbose },

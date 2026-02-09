@@ -13,7 +13,8 @@ mod status_cmd;
 mod tui;
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 
 use gator_core::token::guard;
 use gator_db::pool;
@@ -21,7 +22,7 @@ use gator_db::pool;
 use config::GatorConfig;
 
 #[derive(Parser)]
-#[command(name = "gator", about = "LLM coding agent fleet orchestrator")]
+#[command(name = "gator", about = "LLM coding agent fleet orchestrator", version)]
 struct Cli {
     /// Database URL (overrides GATOR_DATABASE_URL env var)
     #[arg(long, global = true)]
@@ -132,6 +133,11 @@ pub enum Commands {
         /// Override the base branch
         #[arg(long)]
         base: Option<String>,
+    },
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
     },
     /// Launch interactive TUI dashboard
     Dashboard,
@@ -245,7 +251,11 @@ fn cmd_init(db_url: &str, force: bool) -> anyhow::Result<()> {
 
     println!("Config written to {}", path.display());
     println!("  database.url = {db_url}");
-    println!("  auth.token_secret = {}...{}", &token_secret[..8], &token_secret[56..]);
+    println!(
+        "  auth.token_secret = {}...{}",
+        &token_secret[..8],
+        &token_secret[56..]
+    );
     println!();
     println!("Next: run `gator db-init` to create and migrate the database.");
 
@@ -446,6 +456,10 @@ async fn main() -> anyhow::Result<()> {
             let result = pr_cmd::run_pr(&db_pool, &plan_id, &options).await;
             db_pool.close().await;
             result?;
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "gator", &mut std::io::stdout());
         }
         Commands::Dashboard => {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;

@@ -19,8 +19,8 @@ pub struct PrOptions {
 
 /// Run the PR command.
 pub async fn run_pr(pool: &PgPool, plan_id_str: &str, options: &PrOptions) -> Result<()> {
-    let plan_id = Uuid::parse_str(plan_id_str)
-        .with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
+    let plan_id =
+        Uuid::parse_str(plan_id_str).with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
 
     let plan = plan_db::get_plan(pool, plan_id)
         .await?
@@ -51,12 +51,15 @@ pub async fn run_pr(pool: &PgPool, plan_id_str: &str, options: &PrOptions) -> Re
         _ => "-".to_string(),
     };
 
-    let body = build_pr_body(&plan.name, &tasks, input_tokens, output_tokens, &duration_str);
+    let body = build_pr_body(
+        &plan.name,
+        &tasks,
+        input_tokens,
+        output_tokens,
+        &duration_str,
+    );
 
-    let base_branch = options
-        .base
-        .as_deref()
-        .unwrap_or(&plan.base_branch);
+    let base_branch = options.base.as_deref().unwrap_or(&plan.base_branch);
 
     // Build gh command.
     let mut args = vec![
@@ -201,9 +204,12 @@ mod tests {
 
     #[test]
     fn build_pr_body_with_zero_tokens() {
-        let tasks = vec![
-            mock_task("task-a", ScopeLevel::Narrow, TaskStatus::Passed, 1),
-        ];
+        let tasks = vec![mock_task(
+            "task-a",
+            ScopeLevel::Narrow,
+            TaskStatus::Passed,
+            1,
+        )];
 
         let body = build_pr_body("Empty plan", &tasks, 0, 0, "-");
 

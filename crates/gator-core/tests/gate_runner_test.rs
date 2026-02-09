@@ -20,7 +20,7 @@ use gator_db::queries::gate_results;
 use gator_db::queries::invariants::{self, NewInvariant};
 use gator_db::queries::tasks as task_db;
 
-use gator_core::gate::evaluator::{evaluate_verdict, GateAction};
+use gator_core::gate::evaluator::{GateAction, evaluate_verdict};
 use gator_core::gate::{GateRunner, GateVerdict};
 use gator_core::state::dispatch;
 
@@ -191,7 +191,10 @@ async fn all_invariants_pass_auto_gate_passes_task() {
 
     // Run the gate.
     let runner = GateRunner::new(&pool);
-    let verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
 
     // Verdict should be Passed.
     assert!(
@@ -240,7 +243,10 @@ async fn one_invariant_fails_auto_gate_fails_task() {
     advance_task_to_running(&pool, task.id, "/tmp").await;
 
     let runner = GateRunner::new(&pool);
-    let verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
 
     // Verdict should be Failed with one failure.
     match &verdict {
@@ -256,10 +262,7 @@ async fn one_invariant_fails_auto_gate_fails_task() {
     let action = evaluate_verdict(&pool, task.id, &verdict)
         .await
         .expect("evaluate should succeed");
-    assert_eq!(
-        action,
-        GateAction::AutoFailed { can_retry: true },
-    );
+    assert_eq!(action, GateAction::AutoFailed { can_retry: true },);
 
     // Task should be in failed state.
     let t = task_db::get_task(&pool, task.id).await.unwrap().unwrap();
@@ -284,7 +287,10 @@ async fn human_review_gate_leaves_task_in_checking() {
     advance_task_to_running(&pool, task.id, "/tmp").await;
 
     let runner = GateRunner::new(&pool);
-    let verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
     assert!(matches!(verdict, GateVerdict::Passed));
 
     // Evaluate: should return HumanRequired, NOT auto-pass.
@@ -316,7 +322,10 @@ async fn human_approve_gate_leaves_task_in_checking() {
     advance_task_to_running(&pool, task.id, "/tmp").await;
 
     let runner = GateRunner::new(&pool);
-    let verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
     assert!(matches!(verdict, GateVerdict::Passed));
 
     let action = evaluate_verdict(&pool, task.id, &verdict)
@@ -351,7 +360,10 @@ async fn gate_results_recorded_correctly() {
     advance_task_to_running(&pool, task.id, "/tmp").await;
 
     let runner = GateRunner::new(&pool);
-    let _verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let _verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
 
     // Check that gate results were recorded.
     let results = gate_results::get_gate_results(&pool, task.id, 0)
@@ -364,8 +376,14 @@ async fn gate_results_recorded_correctly() {
     let pass_result = results.iter().find(|r| r.invariant_id == inv_pass.id);
     let fail_result = results.iter().find(|r| r.invariant_id == inv_fail.id);
 
-    assert!(pass_result.is_some(), "should have a result for the passing invariant");
-    assert!(fail_result.is_some(), "should have a result for the failing invariant");
+    assert!(
+        pass_result.is_some(),
+        "should have a result for the passing invariant"
+    );
+    assert!(
+        fail_result.is_some(),
+        "should have a result for the failing invariant"
+    );
 
     let pass_result = pass_result.unwrap();
     assert!(pass_result.passed);
@@ -390,14 +408,8 @@ async fn gate_with_real_shell_commands() {
     let task = create_test_task(&pool, plan_id, "shell-task", "auto", 3).await;
 
     // An invariant that runs `echo hello` (produces stdout).
-    let inv_echo = create_test_invariant(
-        &pool,
-        "echo_test",
-        "echo",
-        &["hello".to_owned()],
-        0,
-    )
-    .await;
+    let inv_echo =
+        create_test_invariant(&pool, "echo_test", "echo", &["hello".to_owned()], 0).await;
 
     // An invariant that runs `sh -c "echo err >&2 && exit 1"` (fails with stderr).
     let inv_stderr = create_test_invariant(
@@ -419,7 +431,10 @@ async fn gate_with_real_shell_commands() {
     advance_task_to_running(&pool, task.id, "/tmp").await;
 
     let runner = GateRunner::new(&pool);
-    let verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
 
     match &verdict {
         GateVerdict::Failed { failures } => {
@@ -445,7 +460,11 @@ async fn gate_with_real_shell_commands() {
         .expect("should have echo result");
     assert!(echo_result.passed);
     assert!(
-        echo_result.stdout.as_deref().unwrap_or("").contains("hello"),
+        echo_result
+            .stdout
+            .as_deref()
+            .unwrap_or("")
+            .contains("hello"),
         "stdout should contain 'hello'"
     );
 
@@ -469,7 +488,10 @@ async fn auto_fail_retry_eligibility_when_max_reached() {
     advance_task_to_running(&pool, task.id, "/tmp").await;
 
     let runner = GateRunner::new(&pool);
-    let verdict = runner.run_gate(task.id).await.expect("run_gate should succeed");
+    let verdict = runner
+        .run_gate(task.id)
+        .await
+        .expect("run_gate should succeed");
     assert!(matches!(verdict, GateVerdict::Failed { .. }));
 
     let action = evaluate_verdict(&pool, task.id, &verdict)

@@ -36,9 +36,7 @@ pub enum WorktreeError {
 
     /// The worktree path already exists but is associated with a different
     /// branch than expected.
-    #[error(
-        "worktree path exists but has unexpected branch: expected {expected}, found {found}"
-    )]
+    #[error("worktree path exists but has unexpected branch: expected {expected}, found {found}")]
     BranchMismatch { expected: String, found: String },
 
     /// Failed to parse porcelain output from `git worktree list`.
@@ -181,10 +179,7 @@ impl WorktreeManager {
     /// Returns an error if the git command fails. Any partial state (e.g. a
     /// directory that was created before the failure) is cleaned up on a
     /// best-effort basis.
-    pub fn create_worktree(
-        &self,
-        branch_name: &str,
-    ) -> Result<WorktreeInfo, WorktreeError> {
+    pub fn create_worktree(&self, branch_name: &str) -> Result<WorktreeInfo, WorktreeError> {
         let _lock = self.git_lock.lock().unwrap_or_else(|e| e.into_inner());
 
         let dir_name = branch_name.replace('/', "--");
@@ -391,7 +386,10 @@ impl WorktreeManager {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
         // Check for merge conflict indicators.
-        if stderr.contains("CONFLICT") || stdout.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
+        if stderr.contains("CONFLICT")
+            || stdout.contains("CONFLICT")
+            || stderr.contains("Automatic merge failed")
+        {
             // Abort the conflicted merge.
             let _ = Command::new("git")
                 .args(["merge", "--abort"])
@@ -484,19 +482,13 @@ impl WorktreeManager {
     }
 
     /// Find a worktree by its path in the worktree list.
-    fn find_worktree_by_path(
-        &self,
-        path: &Path,
-    ) -> Result<WorktreeInfo, WorktreeError> {
+    fn find_worktree_by_path(&self, path: &Path) -> Result<WorktreeInfo, WorktreeError> {
         let worktrees = self.list_worktrees()?;
         // Canonicalize for comparison where possible.
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
         for wt in worktrees {
-            let wt_canonical = wt
-                .path
-                .canonicalize()
-                .unwrap_or_else(|_| wt.path.clone());
+            let wt_canonical = wt.path.canonicalize().unwrap_or_else(|_| wt.path.clone());
             if wt_canonical == canonical {
                 return Ok(wt);
             }
@@ -543,8 +535,7 @@ fn parse_porcelain_output(output: &str) -> Result<Vec<WorktreeInfo>, WorktreeErr
     for line in output.lines() {
         if line.is_empty() {
             // End of a block -- commit the current entry if we have one.
-            if let (Some(path), Some(head)) = (current_path.take(), current_head.take())
-            {
+            if let (Some(path), Some(head)) = (current_path.take(), current_head.take()) {
                 worktrees.push(WorktreeInfo {
                     path,
                     branch: current_branch.take(),
@@ -564,10 +555,7 @@ fn parse_porcelain_output(output: &str) -> Result<Vec<WorktreeInfo>, WorktreeErr
             current_head = Some(rest.to_string());
         } else if let Some(rest) = line.strip_prefix("branch ") {
             // Strip the refs/heads/ prefix to get the short branch name.
-            let branch = rest
-                .strip_prefix("refs/heads/")
-                .unwrap_or(rest)
-                .to_string();
+            let branch = rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string();
             current_branch = Some(branch);
         }
         // Ignore `bare`, `detached`, `prunable`, etc.
@@ -672,8 +660,7 @@ mod tests {
     fn test_custom_worktree_base() {
         let (_dir, repo_path) = create_temp_repo();
         let custom_base = repo_path.join("my-worktrees");
-        let mgr =
-            WorktreeManager::new(&repo_path, Some(custom_base.clone())).unwrap();
+        let mgr = WorktreeManager::new(&repo_path, Some(custom_base.clone())).unwrap();
         assert_eq!(mgr.worktree_base(), custom_base);
     }
 
@@ -689,14 +676,13 @@ mod tests {
     fn test_create_and_list_worktree() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("test-plan", "test-task");
-        let info = mgr.create_worktree(&branch).expect("create_worktree failed");
+        let info = mgr
+            .create_worktree(&branch)
+            .expect("create_worktree failed");
 
         assert!(info.path.exists(), "worktree directory should exist");
         assert_eq!(info.branch.as_deref(), Some(branch.as_str()));
@@ -717,11 +703,8 @@ mod tests {
     fn test_create_worktree_idempotent() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "idempotent-task");
 
@@ -737,11 +720,8 @@ mod tests {
     fn test_remove_worktree() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "remove-task");
         let info = mgr.create_worktree(&branch).expect("create failed");
@@ -762,11 +742,8 @@ mod tests {
     fn test_remove_worktree_idempotent() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "remove-idem");
         let info = mgr.create_worktree(&branch).expect("create failed");
@@ -791,12 +768,9 @@ mod tests {
 
         // The main worktree should be at the repo path.
         let repo_canonical = repo_path.canonicalize().unwrap();
-        let found = worktrees.iter().any(|wt| {
-            wt.path
-                .canonicalize()
-                .unwrap_or_else(|_| wt.path.clone())
-                == repo_canonical
-        });
+        let found = worktrees
+            .iter()
+            .any(|wt| wt.path.canonicalize().unwrap_or_else(|_| wt.path.clone()) == repo_canonical);
         assert!(found, "main worktree should be in the list");
     }
 
@@ -804,11 +778,8 @@ mod tests {
     fn test_cleanup_stale() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "stale-task");
         let info = mgr.create_worktree(&branch).expect("create failed");
@@ -834,11 +805,8 @@ mod tests {
     fn test_create_multiple_worktrees() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch1 = WorktreeManager::branch_name("plan", "task-1");
         let branch2 = WorktreeManager::branch_name("plan", "task-2");
@@ -863,11 +831,8 @@ mod tests {
     fn test_worktree_has_correct_content() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "content-check");
         let info = mgr.create_worktree(&branch).expect("create failed");
@@ -876,8 +841,7 @@ mod tests {
         let readme = info.path.join("README.md");
         assert!(readme.exists(), "README.md should exist in worktree");
 
-        let content =
-            std::fs::read_to_string(&readme).expect("failed to read README");
+        let content = std::fs::read_to_string(&readme).expect("failed to read README");
         assert_eq!(content, "# Test repo\n");
     }
 
@@ -885,11 +849,8 @@ mod tests {
     fn test_worktree_isolation() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "isolation-task");
         let info = mgr.create_worktree(&branch).expect("create failed");
@@ -934,10 +895,7 @@ detached
             PathBuf::from("/home/user/worktrees/feature")
         );
         assert_eq!(result[1].head_commit, "789abc012def");
-        assert_eq!(
-            result[1].branch.as_deref(),
-            Some("gator/plan/task")
-        );
+        assert_eq!(result[1].branch.as_deref(), Some("gator/plan/task"));
 
         assert_eq!(
             result[2].path,
@@ -968,11 +926,8 @@ branch refs/heads/main";
     fn test_cleanup_on_failure_removes_directory() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         // Find the current branch of the main worktree. Attempting to
         // create a worktree for the same branch will fail because git
@@ -982,8 +937,7 @@ branch refs/heads/main";
             .current_dir(&repo_path)
             .output()
             .expect("failed to get current branch");
-        let main_branch =
-            String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let main_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
         if !main_branch.is_empty() {
             // Try to create a worktree for the already checked-out branch.
@@ -1007,11 +961,8 @@ branch refs/heads/main";
     fn test_merge_branch_success() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         // Create a worktree, make a commit in it, then merge back.
         let branch = WorktreeManager::branch_name("plan", "merge-task");
@@ -1047,18 +998,18 @@ branch refs/heads/main";
 
         // Verify the file exists in the main repo.
         let merged_file = repo_path.join("feature.txt");
-        assert!(merged_file.exists(), "merged file should exist in main repo");
+        assert!(
+            merged_file.exists(),
+            "merged file should exist in main repo"
+        );
     }
 
     #[test]
     fn test_delete_branch() {
         let (_dir, repo_path) = create_temp_repo();
         let worktree_base = TempDir::new().expect("failed to create worktree base");
-        let mgr = WorktreeManager::new(
-            &repo_path,
-            Some(worktree_base.path().to_path_buf()),
-        )
-        .unwrap();
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
 
         let branch = WorktreeManager::branch_name("plan", "delete-task");
         let info = mgr.create_worktree(&branch).expect("create failed");

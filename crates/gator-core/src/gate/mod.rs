@@ -9,7 +9,7 @@ pub mod evaluator;
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ use gator_db::queries::gate_results::{self, NewGateResult};
 use gator_db::queries::invariants as inv_db;
 use gator_db::queries::tasks as task_db;
 
-use crate::invariant::runner::{run_invariant, InvariantResult};
+use crate::invariant::runner::{InvariantResult, run_invariant};
 use crate::state::dispatch;
 
 // ---------------------------------------------------------------------------
@@ -92,10 +92,7 @@ impl<'a> GateRunner<'a> {
         let invariants = inv_db::get_invariants_for_task(self.pool, task_id).await?;
 
         if invariants.is_empty() {
-            bail!(
-                "task {} has no linked invariants; cannot run gate",
-                task_id
-            );
+            bail!("task {} has no linked invariants; cannot run gate", task_id);
         }
 
         // 4. Run each invariant and collect results.

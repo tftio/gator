@@ -50,8 +50,7 @@ impl TokenConfig {
     ///
     /// Returns an error if the variable is not set.
     pub fn from_env() -> Result<Self, TokenError> {
-        let secret = std::env::var("GATOR_TOKEN_SECRET")
-            .map_err(|_| TokenError::MissingSecret)?;
+        let secret = std::env::var("GATOR_TOKEN_SECRET").map_err(|_| TokenError::MissingSecret)?;
         Ok(Self::new(secret.into_bytes()))
     }
 }
@@ -83,50 +82,37 @@ pub fn generate_token(config: &TokenConfig, task_id: Uuid, attempt: u32) -> Stri
 /// 2. Recomputes the HMAC
 /// 3. Uses constant-time comparison to verify the HMAC
 /// 4. Returns the extracted claims on success
-pub fn validate_token(
-    config: &TokenConfig,
-    token: &str,
-) -> Result<TokenClaims, TokenError> {
+pub fn validate_token(config: &TokenConfig, token: &str) -> Result<TokenClaims, TokenError> {
     // Strip prefix
-    let rest = token
-        .strip_prefix(TOKEN_PREFIX)
-        .ok_or_else(|| TokenError::InvalidFormat(
-            "token must start with 'gator_at_'".to_string(),
-        ))?;
+    let rest = token.strip_prefix(TOKEN_PREFIX).ok_or_else(|| {
+        TokenError::InvalidFormat("token must start with 'gator_at_'".to_string())
+    })?;
 
     // Parse the components: <task_id>_<attempt>_<hmac_hex>
     // A UUID is 36 chars (8-4-4-4-12). We parse the UUID first (36 chars),
     // then expect underscore, then attempt, then underscore, then hmac_hex.
     let (task_id_str, after_task_id) = parse_uuid_prefix(rest)?;
 
-    let task_id = Uuid::parse_str(task_id_str)
-        .map_err(|e| TokenError::InvalidTaskId(e.to_string()))?;
+    let task_id =
+        Uuid::parse_str(task_id_str).map_err(|e| TokenError::InvalidTaskId(e.to_string()))?;
 
     // after_task_id should start with '_'
-    let after_underscore = after_task_id
-        .strip_prefix('_')
-        .ok_or_else(|| TokenError::InvalidFormat(
-            "expected underscore after task_id".to_string(),
-        ))?;
+    let after_underscore = after_task_id.strip_prefix('_').ok_or_else(|| {
+        TokenError::InvalidFormat("expected underscore after task_id".to_string())
+    })?;
 
     // Split on the next underscore to get attempt and hmac
-    let (attempt_str, hmac_hex) = after_underscore
-        .split_once('_')
-        .ok_or_else(|| TokenError::InvalidFormat(
-            "expected underscore between attempt and hmac".to_string(),
-        ))?;
+    let (attempt_str, hmac_hex) = after_underscore.split_once('_').ok_or_else(|| {
+        TokenError::InvalidFormat("expected underscore between attempt and hmac".to_string())
+    })?;
 
     let attempt: u32 = attempt_str
         .parse()
-        .map_err(|e: std::num::ParseIntError| {
-            TokenError::InvalidAttempt(e.to_string())
-        })?;
+        .map_err(|e: std::num::ParseIntError| TokenError::InvalidAttempt(e.to_string()))?;
 
     // Decode the provided HMAC
     let provided_mac = hex::decode(hmac_hex)
-        .map_err(|e| TokenError::InvalidFormat(
-            format!("invalid hex in hmac: {e}"),
-        ))?;
+        .map_err(|e| TokenError::InvalidFormat(format!("invalid hex in hmac: {e}")))?;
 
     // Recompute and verify HMAC using constant-time comparison
     let message = format!("{task_id}:{attempt}");
@@ -149,8 +135,7 @@ fn parse_uuid_prefix(s: &str) -> Result<(&str, &str), TokenError> {
 
 /// Compute HMAC-SHA256 over the given message with the given key.
 fn compute_hmac(key: &[u8], message: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(message);
     mac.finalize().into_bytes().to_vec()
 }
@@ -164,8 +149,7 @@ fn verify_hmac_constant_time(
     message: &[u8],
     expected_mac: &[u8],
 ) -> Result<(), TokenError> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(message);
     mac.verify_slice(expected_mac)
         .map_err(|_| TokenError::HmacMismatch)
@@ -187,7 +171,10 @@ mod tests {
 
         let token = generate_token(&config, task_id, attempt);
 
-        assert!(token.starts_with("gator_at_"), "token must start with gator_at_ prefix");
+        assert!(
+            token.starts_with("gator_at_"),
+            "token must start with gator_at_ prefix"
+        );
         assert!(
             token.contains(&task_id.to_string()),
             "token must contain task_id"
@@ -271,7 +258,10 @@ mod tests {
         let tampered = token.replace(&task_id.to_string(), &other_id.to_string());
 
         let result = validate_token(&config, &tampered);
-        assert!(result.is_err(), "token with tampered task_id must be rejected");
+        assert!(
+            result.is_err(),
+            "token with tampered task_id must be rejected"
+        );
     }
 
     #[test]
@@ -287,7 +277,10 @@ mod tests {
         let tampered = format!("{prefix_and_uuid}{tampered_after}");
 
         let result = validate_token(&config, &tampered);
-        assert!(result.is_err(), "token with tampered attempt must be rejected");
+        assert!(
+            result.is_err(),
+            "token with tampered attempt must be rejected"
+        );
     }
 
     #[test]
@@ -298,7 +291,10 @@ mod tests {
 
         let wrong_config = TokenConfig::new(b"wrong-secret-key".to_vec());
         let result = validate_token(&wrong_config, &token);
-        assert!(result.is_err(), "token validated with wrong secret must be rejected");
+        assert!(
+            result.is_err(),
+            "token validated with wrong secret must be rejected"
+        );
         assert!(matches!(result.unwrap_err(), TokenError::HmacMismatch));
     }
 
@@ -329,10 +325,7 @@ mod tests {
     #[test]
     fn reject_invalid_uuid() {
         let config = test_config();
-        let result = validate_token(
-            &config,
-            "gator_at_not-a-valid-uuid-at-all-noooooo_1_abcdef",
-        );
+        let result = validate_token(&config, "gator_at_not-a-valid-uuid-at-all-noooooo_1_abcdef");
         assert!(result.is_err());
     }
 
@@ -387,7 +380,10 @@ mod tests {
         let token1 = generate_token(&config, task_id, 1);
         let token2 = generate_token(&config, task_id, 1);
 
-        assert_eq!(token1, token2, "same inputs must produce deterministic token");
+        assert_eq!(
+            token1, token2,
+            "same inputs must produce deterministic token"
+        );
     }
 
     #[test]
