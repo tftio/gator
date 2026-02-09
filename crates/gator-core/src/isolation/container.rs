@@ -53,7 +53,7 @@ impl ContainerIsolation {
 
     /// Build the branch name for a plan/task pair (same convention as worktree).
     fn branch_name(plan_name: &str, task_name: &str) -> String {
-        format!("gator/{plan_name}/{task_name}")
+        crate::worktree::WorktreeManager::branch_name(plan_name, task_name)
     }
 
     /// Create a git branch in the host repo for this task.

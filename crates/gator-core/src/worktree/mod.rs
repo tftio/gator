@@ -161,8 +161,79 @@ impl WorktreeManager {
     /// Build the conventional branch name for a plan/task pair.
     ///
     /// Format: `gator/<plan_name>/<task_name>`
+    ///
+    /// Both names are sanitized for git ref safety (spaces, special chars, etc.
+    /// are replaced with hyphens).
     pub fn branch_name(plan_name: &str, task_name: &str) -> String {
-        format!("gator/{plan_name}/{task_name}")
+        let plan = sanitize_ref_component(plan_name);
+        let task = sanitize_ref_component(task_name);
+        format!("gator/{plan}/{task}")
+    }
+
+    /// Commit all changes (tracked and untracked) in a worktree.
+    ///
+    /// Runs `git add -A` followed by `git commit` in the given worktree
+    /// directory. If there is nothing to commit, returns `Ok(false)`.
+    /// On successful commit, returns `Ok(true)`.
+    pub fn commit_worktree(
+        &self,
+        worktree_path: &Path,
+        message: &str,
+    ) -> Result<bool, WorktreeError> {
+        // Stage all changes (including untracked files).
+        let output = Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommand {
+                message: "failed to run git add -A".into(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(WorktreeError::GitExit {
+                command: "add -A".into(),
+                code: output.status.code().unwrap_or(-1),
+                stderr,
+            });
+        }
+
+        // Check if there is anything to commit.
+        let status = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommand {
+                message: "failed to run git status".into(),
+                source: e,
+            })?;
+
+        let status_text = String::from_utf8_lossy(&status.stdout);
+        if status_text.trim().is_empty() {
+            return Ok(false);
+        }
+
+        // Commit.
+        let output = Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(worktree_path)
+            .output()
+            .map_err(|e| WorktreeError::GitCommand {
+                message: "failed to run git commit".into(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(WorktreeError::GitExit {
+                command: "commit".into(),
+                code: output.status.code().unwrap_or(-1),
+                stderr,
+            });
+        }
+
+        Ok(true)
     }
 
     /// Create a new worktree with the given branch name.
@@ -514,6 +585,66 @@ impl WorktreeManager {
     }
 }
 
+/// Sanitize a string for use as a git ref component (between slashes).
+///
+/// Applies rules from `git check-ref-format`:
+/// - Replaces whitespace, `~`, `^`, `:`, `\`, `?`, `*`, `[`, `@{` with `-`
+/// - Collapses consecutive `-` into one
+/// - Strips leading/trailing `-` and `.`
+/// - Removes `..` sequences
+/// - Falls back to `_` if the result is empty
+pub fn sanitize_ref_component(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+
+    for ch in s.chars() {
+        match ch {
+            ' '
+            | '\t'
+            | '~'
+            | '^'
+            | ':'
+            | '\\'
+            | '?'
+            | '*'
+            | '['
+            | '@'
+            | '\x00'..='\x1f'
+            | '\x7f' => {
+                result.push('-');
+            }
+            _ => result.push(ch),
+        }
+    }
+
+    // Remove `..` sequences.
+    while result.contains("..") {
+        result = result.replace("..", ".");
+    }
+
+    // Collapse consecutive hyphens.
+    let mut collapsed = String::with_capacity(result.len());
+    let mut prev_hyphen = false;
+    for ch in result.chars() {
+        if ch == '-' {
+            if !prev_hyphen {
+                collapsed.push('-');
+            }
+            prev_hyphen = true;
+        } else {
+            prev_hyphen = false;
+            collapsed.push(ch);
+        }
+    }
+
+    // Strip leading/trailing `-` and `.`.
+    let trimmed = collapsed.trim_matches(&['-', '.'][..]);
+    if trimmed.is_empty() {
+        "_".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Parse the porcelain output of `git worktree list --porcelain`.
 ///
 /// The format consists of blocks separated by blank lines. Each block has:
@@ -670,6 +801,59 @@ mod tests {
             WorktreeManager::branch_name("add-auth", "implement-jwt"),
             "gator/add-auth/implement-jwt"
         );
+    }
+
+    #[test]
+    fn test_branch_name_sanitizes_spaces() {
+        assert_eq!(
+            WorktreeManager::branch_name("Add gator serve command", "add deps"),
+            "gator/Add-gator-serve-command/add-deps"
+        );
+    }
+
+    #[test]
+    fn test_branch_name_sanitizes_special_chars() {
+        assert_eq!(
+            WorktreeManager::branch_name("plan~1", "task^2:fix"),
+            "gator/plan-1/task-2-fix"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_ref_component_passthrough() {
+        assert_eq!(sanitize_ref_component("add-auth"), "add-auth");
+        assert_eq!(sanitize_ref_component("simple"), "simple");
+    }
+
+    #[test]
+    fn test_sanitize_ref_component_spaces() {
+        assert_eq!(sanitize_ref_component("hello world"), "hello-world");
+        assert_eq!(sanitize_ref_component("a  b  c"), "a-b-c");
+    }
+
+    #[test]
+    fn test_sanitize_ref_component_dots() {
+        assert_eq!(sanitize_ref_component("a..b"), "a.b");
+        assert_eq!(sanitize_ref_component("..."), "_");
+    }
+
+    #[test]
+    fn test_sanitize_ref_component_leading_trailing() {
+        assert_eq!(sanitize_ref_component("-foo-"), "foo");
+        assert_eq!(sanitize_ref_component(".bar."), "bar");
+        assert_eq!(sanitize_ref_component("--baz--"), "baz");
+    }
+
+    #[test]
+    fn test_sanitize_ref_component_empty() {
+        assert_eq!(sanitize_ref_component(""), "_");
+        assert_eq!(sanitize_ref_component("---"), "_");
+    }
+
+    #[test]
+    fn test_sanitize_ref_component_git_special_chars() {
+        assert_eq!(sanitize_ref_component("a~b^c:d"), "a-b-c-d");
+        assert_eq!(sanitize_ref_component("a\\b?c*d[e"), "a-b-c-d-e");
     }
 
     #[test]
@@ -1032,5 +1216,77 @@ branch refs/heads/main";
         // Deleting a non-existent branch should not error.
         mgr.delete_branch("gator/nonexistent/branch")
             .expect("deleting nonexistent branch should not fail");
+    }
+
+    #[test]
+    fn test_commit_worktree_with_changes() {
+        let (_dir, repo_path) = create_temp_repo();
+        let worktree_base = TempDir::new().expect("failed to create worktree base");
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
+
+        let branch = WorktreeManager::branch_name("plan", "commit-task");
+        let info = mgr.create_worktree(&branch).expect("create failed");
+
+        // Write a new file.
+        std::fs::write(info.path.join("work.txt"), "agent output\n").unwrap();
+
+        // Commit should succeed.
+        let committed = mgr
+            .commit_worktree(&info.path, "gator: commit-task (attempt 0)")
+            .expect("commit failed");
+        assert!(committed, "should have committed changes");
+
+        // Verify the commit exists on the branch.
+        let output = Command::new("git")
+            .args(["log", "--oneline", "-1"])
+            .current_dir(&info.path)
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&output.stdout);
+        assert!(log.contains("gator: commit-task"));
+    }
+
+    #[test]
+    fn test_commit_worktree_no_changes() {
+        let (_dir, repo_path) = create_temp_repo();
+        let worktree_base = TempDir::new().expect("failed to create worktree base");
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
+
+        let branch = WorktreeManager::branch_name("plan", "no-changes");
+        let info = mgr.create_worktree(&branch).expect("create failed");
+
+        // No changes made -- commit should return false.
+        let committed = mgr
+            .commit_worktree(&info.path, "nothing to commit")
+            .expect("commit failed");
+        assert!(!committed, "should not have committed when no changes");
+    }
+
+    #[test]
+    fn test_commit_worktree_then_merge() {
+        let (_dir, repo_path) = create_temp_repo();
+        let worktree_base = TempDir::new().expect("failed to create worktree base");
+        let mgr =
+            WorktreeManager::new(&repo_path, Some(worktree_base.path().to_path_buf())).unwrap();
+
+        let branch = WorktreeManager::branch_name("plan", "commit-merge");
+        let info = mgr.create_worktree(&branch).expect("create failed");
+
+        // Write and commit via commit_worktree.
+        std::fs::write(info.path.join("feature.rs"), "fn main() {}\n").unwrap();
+        let committed = mgr
+            .commit_worktree(&info.path, "gator: commit-merge (attempt 0)")
+            .expect("commit failed");
+        assert!(committed);
+
+        // Remove worktree, then merge.
+        mgr.remove_worktree(&info.path).expect("remove failed");
+        let result = mgr.merge_branch(&branch).expect("merge failed");
+        assert_eq!(result, MergeResult::Success);
+
+        // File should exist in main repo.
+        assert!(repo_path.join("feature.rs").exists());
     }
 }

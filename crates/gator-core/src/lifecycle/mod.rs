@@ -204,7 +204,21 @@ pub async fn run_agent_lifecycle(
         .with_context(|| format!("failed to evaluate verdict for task {}", task.name))?;
 
     let result = match action {
-        GateAction::AutoPassed => LifecycleResult::Passed,
+        GateAction::AutoPassed => {
+            // Commit all agent work to the worktree branch so `gator merge` can find it.
+            match commit_agent_work(&worktree_path, &task.name, attempt) {
+                Ok(true) => {
+                    tracing::info!(task_id = %task_id, "committed agent work to branch");
+                }
+                Ok(false) => {
+                    tracing::info!(task_id = %task_id, "no changes to commit");
+                }
+                Err(e) => {
+                    tracing::warn!(task_id = %task_id, error = %e, "failed to commit agent work (non-fatal)");
+                }
+            }
+            LifecycleResult::Passed
+        }
         GateAction::AutoFailed { can_retry: true } => LifecycleResult::FailedCanRetry,
         GateAction::AutoFailed { can_retry: false } => LifecycleResult::FailedNoRetry,
         GateAction::HumanRequired => LifecycleResult::HumanRequired,
@@ -218,6 +232,66 @@ pub async fn run_agent_lifecycle(
     );
 
     Ok(result)
+}
+
+/// Commit all agent work in a worktree (git add -A + git commit).
+///
+/// Returns `Ok(true)` if a commit was created, `Ok(false)` if there was
+/// nothing to commit, or `Err` if the git commands failed.
+fn commit_agent_work(
+    worktree_path: &std::path::Path,
+    task_name: &str,
+    attempt: u32,
+) -> Result<bool> {
+    use std::process::Command;
+
+    // Configure git user for the worktree (in case it's not inherited).
+    let _ = Command::new("git")
+        .args(["config", "user.email", "gator@localhost"])
+        .current_dir(worktree_path)
+        .output();
+    let _ = Command::new("git")
+        .args(["config", "user.name", "gator"])
+        .current_dir(worktree_path)
+        .output();
+
+    // Stage all changes.
+    let output = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(worktree_path)
+        .output()
+        .with_context(|| "failed to run git add -A")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git add -A failed: {stderr}");
+    }
+
+    // Check if there is anything to commit.
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(worktree_path)
+        .output()
+        .with_context(|| "failed to run git status")?;
+
+    if String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+        return Ok(false);
+    }
+
+    // Commit.
+    let message = format!("gator: {task_name} (attempt {attempt})");
+    let output = Command::new("git")
+        .args(["commit", "-m", &message])
+        .current_dir(worktree_path)
+        .output()
+        .with_context(|| "failed to run git commit")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git commit failed: {stderr}");
+    }
+
+    Ok(true)
 }
 
 /// Collect events from an agent's event stream and persist them to the DB.
