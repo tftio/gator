@@ -1,0 +1,125 @@
+# Invariant preset library
+#
+# Each [[presets]] entry defines a standard invariant for a project type.
+# Adding new entries here automatically makes them available via
+# `gator plan init` and `gator invariant presets install`.
+
+# =============================================================================
+# Rust
+# =============================================================================
+
+[[presets]]
+name = "rust_build"
+project_type = "rust"
+description = "Build the workspace"
+kind = "typecheck"
+command = "cargo"
+args = ["build", "--workspace"]
+
+[[presets]]
+name = "rust_test"
+project_type = "rust"
+description = "Run all tests"
+kind = "test_suite"
+command = "cargo"
+args = ["test", "--workspace"]
+
+[[presets]]
+name = "rust_clippy"
+project_type = "rust"
+description = "Lint with clippy"
+kind = "lint"
+command = "cargo"
+args = ["clippy", "--workspace", "--", "-D", "warnings"]
+
+[[presets]]
+name = "rust_fmt_check"
+project_type = "rust"
+description = "Check code formatting"
+kind = "lint"
+command = "cargo"
+args = ["fmt", "--all", "--", "--check"]
+
+# =============================================================================
+# Node
+# =============================================================================
+
+[[presets]]
+name = "node_test"
+project_type = "node"
+description = "Run test suite"
+kind = "test_suite"
+command = "npm"
+args = ["test"]
+
+[[presets]]
+name = "node_build"
+project_type = "node"
+description = "Build the project"
+kind = "typecheck"
+command = "npm"
+args = ["run", "build"]
+
+[[presets]]
+name = "node_lint"
+project_type = "node"
+description = "Run linter"
+kind = "lint"
+command = "npm"
+args = ["run", "lint"]
+
+# =============================================================================
+# Python
+# =============================================================================
+
+[[presets]]
+name = "python_test"
+project_type = "python"
+description = "Run pytest"
+kind = "test_suite"
+command = "pytest"
+args = []
+
+[[presets]]
+name = "python_ruff"
+project_type = "python"
+description = "Lint with ruff"
+kind = "lint"
+command = "ruff"
+args = ["check", "."]
+
+[[presets]]
+name = "python_typecheck"
+project_type = "python"
+description = "Type check with mypy"
+kind = "typecheck"
+command = "mypy"
+args = ["."]
+
+# =============================================================================
+# Go
+# =============================================================================
+
+[[presets]]
+name = "go_build"
+project_type = "go"
+description = "Build all packages"
+kind = "typecheck"
+command = "go"
+args = ["build", "./..."]
+
+[[presets]]
+name = "go_test"
+project_type = "go"
+description = "Run all tests"
+kind = "test_suite"
+command = "go"
+args = ["test", "./..."]
+
+[[presets]]
+name = "go_vet"
+project_type = "go"
+description = "Static analysis"
+kind = "lint"
+command = "go"
+args = ["vet", "./..."]

@@ -1,18 +1,21 @@
 //! Operator-mode CLI handlers for `gator invariant` subcommands.
 //!
 //! Implements:
-//! - `gator invariant add`  -- create a new invariant definition
-//! - `gator invariant list` -- list all invariants in table format
-//! - `gator invariant test` -- test-run an invariant in the current directory
+//! - `gator invariant add`           -- create a new invariant definition
+//! - `gator invariant list`          -- list all invariants in table format
+//! - `gator invariant test`          -- test-run an invariant in the current directory
+//! - `gator invariant presets list`  -- list available preset invariants
+//! - `gator invariant presets install` -- register preset invariants in the database
 
 use anyhow::{Context, Result, bail};
 use sqlx::PgPool;
 
 use gator_core::invariant::runner::{self, InvariantResult};
+use gator_core::presets;
 use gator_db::models::{InvariantKind, InvariantScope};
 use gator_db::queries::invariants;
 
-use crate::InvariantCommands;
+use crate::{InvariantCommands, PresetCommands};
 
 // -----------------------------------------------------------------------
 // Public entry point
@@ -50,6 +53,14 @@ pub async fn run_invariant_command(command: InvariantCommands, pool: &PgPool) ->
         }
         InvariantCommands::List { verbose } => cmd_list(pool, verbose).await,
         InvariantCommands::Test { name } => cmd_test(pool, &name).await,
+        InvariantCommands::Presets { command } => match command {
+            PresetCommands::List { project_type } => {
+                cmd_presets_list(project_type.as_deref())
+            }
+            PresetCommands::Install { project_type } => {
+                cmd_presets_install(pool, project_type.as_deref()).await
+            }
+        },
     }
 }
 
@@ -279,6 +290,171 @@ fn print_truncated(text: &str, max_chars: usize) {
 }
 
 // -----------------------------------------------------------------------
+// gator invariant presets list [--project-type <type>]
+// -----------------------------------------------------------------------
+
+/// List available preset invariants, optionally filtered by project type.
+fn cmd_presets_list(project_type_filter: Option<&str>) -> Result<()> {
+    let all_presets = presets::load_presets();
+
+    let filtered: Vec<&presets::InvariantPreset> = match project_type_filter {
+        Some(pt) => {
+            let known = presets::available_project_types();
+            if !known.contains(&pt.to_string()) {
+                bail!(
+                    "unknown project type {:?}; available types: {}",
+                    pt,
+                    known.join(", ")
+                );
+            }
+            all_presets.iter().filter(|p| p.project_type == pt).collect()
+        }
+        None => all_presets.iter().collect(),
+    };
+
+    if filtered.is_empty() {
+        println!("No presets found.");
+        return Ok(());
+    }
+
+    // Compute column widths.
+    let name_w = filtered
+        .iter()
+        .map(|p| p.name.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let type_w = filtered
+        .iter()
+        .map(|p| p.project_type.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let kind_w = filtered
+        .iter()
+        .map(|p| p.kind.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+
+    // Header
+    println!(
+        "{:<name_w$}  {:<type_w$}  {:<kind_w$}  DESCRIPTION",
+        "NAME", "TYPE", "KIND",
+    );
+
+    // Rows
+    for preset in &filtered {
+        println!(
+            "{:<name_w$}  {:<type_w$}  {:<kind_w$}  {}",
+            preset.name, preset.project_type, preset.kind, preset.description,
+        );
+    }
+
+    println!();
+    println!(
+        "{} preset(s) available.",
+        filtered.len()
+    );
+
+    Ok(())
+}
+
+// -----------------------------------------------------------------------
+// gator invariant presets install [--project-type <type>]
+// -----------------------------------------------------------------------
+
+/// Detect project type (or use override) and register matching preset
+/// invariants in the database. Skips any that already exist.
+async fn cmd_presets_install(pool: &PgPool, project_type_override: Option<&str>) -> Result<()> {
+    let project_type = match project_type_override {
+        Some(pt) => {
+            let known = presets::available_project_types();
+            if !known.contains(&pt.to_string()) {
+                bail!(
+                    "unknown project type {:?}; available types: {}",
+                    pt,
+                    known.join(", ")
+                );
+            }
+            pt.to_string()
+        }
+        None => {
+            let cwd = std::env::current_dir().context("failed to get current directory")?;
+            match presets::detect_project_type(&cwd) {
+                Some(pt) => {
+                    println!("Detected project type: {}", pt);
+                    pt
+                }
+                None => {
+                    bail!(
+                        "could not detect project type. Use --project-type to specify one of: {}",
+                        presets::available_project_types().join(", ")
+                    );
+                }
+            }
+        }
+    };
+
+    let matching = presets::presets_for_project_type(&project_type);
+    if matching.is_empty() {
+        println!("No presets defined for project type {:?}.", project_type);
+        return Ok(());
+    }
+
+    let mut registered = vec![];
+    let mut skipped = vec![];
+
+    for preset in &matching {
+        let existing = invariants::get_invariant_by_name(pool, &preset.name).await?;
+        if existing.is_some() {
+            skipped.push(preset.name.clone());
+            continue;
+        }
+
+        let kind: InvariantKind = preset.kind.parse().map_err(|_| {
+            anyhow::anyhow!(
+                "preset {:?} has invalid kind {:?}",
+                preset.name,
+                preset.kind
+            )
+        })?;
+
+        let new = invariants::NewInvariant {
+            name: &preset.name,
+            description: Some(&preset.description),
+            kind,
+            command: &preset.command,
+            args: &preset.args,
+            expected_exit_code: 0,
+            threshold: None,
+            scope: InvariantScope::Project,
+            timeout_secs: 300,
+        };
+
+        invariants::insert_invariant(pool, &new).await?;
+        registered.push(preset.name.clone());
+    }
+
+    if !registered.is_empty() {
+        println!(
+            "Registered {} invariant(s): {}",
+            registered.len(),
+            registered.join(", ")
+        );
+    }
+    if !skipped.is_empty() {
+        println!(
+            "Skipped {} invariant(s) (already exist): {}",
+            skipped.len(),
+            skipped.join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+// -----------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------
 
@@ -301,6 +477,104 @@ mod tests {
             #[command(subcommand)]
             command: InvariantCommands,
         },
+    }
+
+    // -- Preset subcommand parsing tests --
+
+    #[test]
+    fn clap_parses_presets_list() {
+        let cli = TestCli::try_parse_from(["gator", "invariant", "presets", "list"])
+            .expect("should parse");
+        match cli.command {
+            TestCommands::Invariant {
+                command: InvariantCommands::Presets {
+                    command: PresetCommands::List { project_type },
+                },
+            } => {
+                assert!(project_type.is_none());
+            }
+            _ => panic!("expected Invariant Presets List"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_presets_list_with_type() {
+        let cli = TestCli::try_parse_from([
+            "gator",
+            "invariant",
+            "presets",
+            "list",
+            "--project-type",
+            "rust",
+        ])
+        .expect("should parse");
+        match cli.command {
+            TestCommands::Invariant {
+                command: InvariantCommands::Presets {
+                    command: PresetCommands::List { project_type },
+                },
+            } => {
+                assert_eq!(project_type.as_deref(), Some("rust"));
+            }
+            _ => panic!("expected Invariant Presets List"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_presets_install() {
+        let cli = TestCli::try_parse_from(["gator", "invariant", "presets", "install"])
+            .expect("should parse");
+        match cli.command {
+            TestCommands::Invariant {
+                command: InvariantCommands::Presets {
+                    command: PresetCommands::Install { project_type },
+                },
+            } => {
+                assert!(project_type.is_none());
+            }
+            _ => panic!("expected Invariant Presets Install"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_presets_install_with_type() {
+        let cli = TestCli::try_parse_from([
+            "gator",
+            "invariant",
+            "presets",
+            "install",
+            "--project-type",
+            "python",
+        ])
+        .expect("should parse");
+        match cli.command {
+            TestCommands::Invariant {
+                command: InvariantCommands::Presets {
+                    command: PresetCommands::Install { project_type },
+                },
+            } => {
+                assert_eq!(project_type.as_deref(), Some("python"));
+            }
+            _ => panic!("expected Invariant Presets Install"),
+        }
+    }
+
+    // -- Presets list output tests (no DB needed) --
+
+    #[test]
+    fn presets_list_all_succeeds() {
+        cmd_presets_list(None).expect("listing all presets should succeed");
+    }
+
+    #[test]
+    fn presets_list_rust_succeeds() {
+        cmd_presets_list(Some("rust")).expect("listing rust presets should succeed");
+    }
+
+    #[test]
+    fn presets_list_unknown_type_fails() {
+        let result = cmd_presets_list(Some("cobol"));
+        assert!(result.is_err());
     }
 
     // -- Enum parsing tests --

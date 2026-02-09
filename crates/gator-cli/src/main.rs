@@ -166,6 +166,20 @@ pub enum Commands {
 
 #[derive(Subcommand)]
 pub enum PlanCommands {
+    /// Scaffold a new plan TOML with project-aware defaults
+    Init {
+        /// Plan name (used as filename: <name>.toml)
+        name: String,
+        /// Override detected project type (rust, node, python, go)
+        #[arg(long)]
+        project_type: Option<String>,
+        /// Skip registering preset invariants in the database
+        #[arg(long)]
+        no_register: bool,
+        /// Output file path (defaults to <name>.toml)
+        #[arg(long, short)]
+        output: Option<String>,
+    },
     /// Create a plan from a TOML file
     Create {
         /// Path to the plan TOML file
@@ -232,6 +246,27 @@ pub enum InvariantCommands {
     Test {
         /// Invariant name to test
         name: String,
+    },
+    /// List or install preset invariants
+    Presets {
+        #[command(subcommand)]
+        command: PresetCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PresetCommands {
+    /// List available preset invariants
+    List {
+        /// Filter by project type (rust, node, python, go)
+        #[arg(long)]
+        project_type: Option<String>,
+    },
+    /// Register preset invariants in the database
+    Install {
+        /// Project type to install presets for (auto-detected if omitted)
+        #[arg(long)]
+        project_type: Option<String>,
     },
 }
 
@@ -351,11 +386,17 @@ async fn main() -> anyhow::Result<()> {
             cmd_db_init(cli.database_url.as_deref()).await?;
         }
         Commands::Plan { command } => {
-            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
-            let db_pool = pool::create_pool(&resolved.db_config).await?;
-            let result = plan_cmds::run_plan_command(command, &db_pool).await;
-            db_pool.close().await;
-            result?;
+            // plan init can work without a database (--no-register mode).
+            if matches!(command, PlanCommands::Init { no_register: true, .. }) {
+                let result = plan_cmds::run_plan_command(command, None).await;
+                result?;
+            } else {
+                let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+                let db_pool = pool::create_pool(&resolved.db_config).await?;
+                let result = plan_cmds::run_plan_command(command, Some(&db_pool)).await;
+                db_pool.close().await;
+                result?;
+            }
         }
         Commands::Invariant { command } => {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;

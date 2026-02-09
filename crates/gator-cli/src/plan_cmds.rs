@@ -1,19 +1,24 @@
 //! Operator-mode CLI handlers for `gator plan` subcommands.
 //!
 //! Implements:
-//! - `gator plan create <file>`    -- create a plan from a TOML file
-//! - `gator plan show [plan-id]`   -- show plan details or list all plans
+//! - `gator plan init <name>`       -- scaffold a plan TOML with project-aware defaults
+//! - `gator plan create <file>`     -- create a plan from a TOML file
+//! - `gator plan show [plan-id]`    -- show plan details or list all plans
 //! - `gator plan approve <plan-id>` -- transition a plan from draft to approved
+//! - `gator plan export <plan-id>`  -- export a plan as TOML
 
 use std::collections::HashMap;
+use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_core::plan::{
     create_plan_from_toml, get_plan_with_tasks, materialize_plan, parse_plan_toml,
 };
+use gator_core::presets;
+use gator_db::models::{InvariantKind, InvariantScope};
 use gator_db::queries::{invariants as inv_queries, plans as plan_queries, tasks as task_queries};
 
 use crate::PlanCommands;
@@ -23,18 +28,241 @@ use crate::PlanCommands;
 // -----------------------------------------------------------------------
 
 /// Dispatch a `PlanCommands` variant to the appropriate handler.
-pub async fn run_plan_command(command: PlanCommands, pool: &PgPool) -> Result<()> {
+///
+/// `pool` is `None` only for `plan init --no-register` (no DB needed).
+/// All other subcommands require a database connection.
+pub async fn run_plan_command(command: PlanCommands, pool: Option<&PgPool>) -> Result<()> {
     match command {
-        PlanCommands::Create { file } => cmd_create(pool, &file).await,
-        PlanCommands::Show { plan_id } => match plan_id {
-            Some(id) => cmd_show_one(pool, &id).await,
-            None => cmd_show_all(pool).await,
-        },
-        PlanCommands::Approve { plan_id } => cmd_approve(pool, &plan_id).await,
+        PlanCommands::Init {
+            name,
+            project_type,
+            no_register,
+            output,
+        } => cmd_plan_init(pool, &name, project_type.as_deref(), no_register, output.as_deref()).await,
+        PlanCommands::Create { file } => {
+            let pool = pool.context("database connection required for plan create")?;
+            cmd_create(pool, &file).await
+        }
+        PlanCommands::Show { plan_id } => {
+            let pool = pool.context("database connection required for plan show")?;
+            match plan_id {
+                Some(id) => cmd_show_one(pool, &id).await,
+                None => cmd_show_all(pool).await,
+            }
+        }
+        PlanCommands::Approve { plan_id } => {
+            let pool = pool.context("database connection required for plan approve")?;
+            cmd_approve(pool, &plan_id).await
+        }
         PlanCommands::Export { plan_id, output } => {
+            let pool = pool.context("database connection required for plan export")?;
             cmd_export(pool, &plan_id, output.as_deref()).await
         }
     }
+}
+
+// -----------------------------------------------------------------------
+// gator plan init <name>
+// -----------------------------------------------------------------------
+
+/// Scaffold a new plan TOML with project-aware defaults.
+///
+/// Detects the project type and base branch, optionally registers preset
+/// invariants in the database, and writes a starter plan TOML file.
+async fn cmd_plan_init(
+    pool: Option<&PgPool>,
+    name: &str,
+    project_type_override: Option<&str>,
+    no_register: bool,
+    output_override: Option<&str>,
+) -> Result<()> {
+    let cwd = std::env::current_dir().context("failed to get current directory")?;
+
+    // 1. Resolve project type.
+    let project_type = match project_type_override {
+        Some(pt) => {
+            // Validate it is a known type.
+            let known = presets::available_project_types();
+            if !known.contains(&pt.to_string()) {
+                bail!(
+                    "unknown project type {:?}; available types: {}",
+                    pt,
+                    known.join(", ")
+                );
+            }
+            pt.to_string()
+        }
+        None => match presets::detect_project_type(&cwd) {
+            Some(pt) => {
+                println!("Detected project type: {}", pt);
+                pt
+            }
+            None => {
+                bail!(
+                    "could not detect project type in {}.\n\
+                     Use --project-type to specify one of: {}",
+                    cwd.display(),
+                    presets::available_project_types().join(", ")
+                );
+            }
+        },
+    };
+
+    // 2. Detect base branch.
+    let base_branch = presets::detect_base_branch(&cwd);
+
+    // 3. Get matching presets.
+    let matching_presets = presets::presets_for_project_type(&project_type);
+
+    // 4. Register invariants in DB (unless --no-register).
+    if !no_register {
+        if let Some(pool) = pool {
+            let (registered, skipped) = register_presets(pool, &matching_presets).await?;
+            if !registered.is_empty() {
+                println!(
+                    "Registered {} invariant(s): {}",
+                    registered.len(),
+                    registered.join(", ")
+                );
+            }
+            if !skipped.is_empty() {
+                println!(
+                    "Skipped {} invariant(s) (already exist): {}",
+                    skipped.len(),
+                    skipped.join(", ")
+                );
+            }
+        } else {
+            println!("No database connection; skipping invariant registration.");
+            println!("Run `gator invariant presets install` later to register them.");
+        }
+    }
+
+    // 5. Generate the plan TOML content.
+    let invariant_names: Vec<&str> = matching_presets.iter().map(|p| p.name.as_str()).collect();
+    let toml_content = generate_plan_toml(name, &base_branch, &invariant_names);
+
+    // 6. Write to file.
+    let output_path = match output_override {
+        Some(p) => p.to_string(),
+        None => format!("{name}.toml"),
+    };
+
+    if Path::new(&output_path).exists() {
+        bail!(
+            "file {:?} already exists. Use --output to specify a different path.",
+            output_path
+        );
+    }
+
+    std::fs::write(&output_path, &toml_content)
+        .with_context(|| format!("failed to write {}", output_path))?;
+
+    println!();
+    println!("Plan scaffolded: {}", output_path);
+    println!("  Name:         {}", name);
+    println!("  Base branch:  {}", base_branch);
+    println!("  Project type: {}", project_type);
+    println!(
+        "  Invariants:   {}",
+        if invariant_names.is_empty() {
+            "(none)".to_string()
+        } else {
+            invariant_names.join(", ")
+        }
+    );
+    println!();
+    println!("Next steps:");
+    println!("  1. Edit {} to describe your tasks", output_path);
+    println!("  2. Run `gator plan create {}` to load it into the database", output_path);
+    println!("  3. Run `gator plan approve <plan-id>` to approve it");
+    println!("  4. Run `gator dispatch <plan-id>` to start execution");
+
+    Ok(())
+}
+
+/// Register invariant presets in the database, skipping any that already exist.
+///
+/// Returns `(registered, skipped)` name lists.
+async fn register_presets(
+    pool: &PgPool,
+    preset_list: &[presets::InvariantPreset],
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut registered = vec![];
+    let mut skipped = vec![];
+
+    for preset in preset_list {
+        let existing = inv_queries::get_invariant_by_name(pool, &preset.name).await?;
+        if existing.is_some() {
+            skipped.push(preset.name.clone());
+            continue;
+        }
+
+        let kind: InvariantKind = preset.kind.parse().map_err(|_| {
+            anyhow::anyhow!(
+                "preset {:?} has invalid kind {:?}",
+                preset.name,
+                preset.kind
+            )
+        })?;
+
+        let new = inv_queries::NewInvariant {
+            name: &preset.name,
+            description: Some(&preset.description),
+            kind,
+            command: &preset.command,
+            args: &preset.args,
+            expected_exit_code: 0,
+            threshold: None,
+            scope: InvariantScope::Project,
+            timeout_secs: 300,
+        };
+
+        inv_queries::insert_invariant(pool, &new).await?;
+        registered.push(preset.name.clone());
+    }
+
+    Ok((registered, skipped))
+}
+
+/// Generate plan TOML content with comments showing optional fields.
+///
+/// The output is hand-built (not `toml::to_string`) to include comments,
+/// which the TOML serializer cannot produce. This is intentional -- the
+/// generated file is a template for human editing.
+fn generate_plan_toml(name: &str, base_branch: &str, invariant_names: &[&str]) -> String {
+    let mut out = String::new();
+
+    // [plan] section
+    out.push_str("[plan]\n");
+    out.push_str(&format!("name = {:?}\n", name));
+    out.push_str(&format!("base_branch = {:?}\n", base_branch));
+    out.push_str("# token_budget = 500000\n");
+    out.push_str("# isolation = \"worktree\"\n");
+    out.push_str("# container_image = \"gator-agent:latest\"\n");
+
+    // [[tasks]] stub
+    out.push_str("\n[[tasks]]\n");
+    out.push_str("name = \"task-1\"\n");
+    out.push_str("description = \"\"\"\n");
+    out.push_str("Describe what the agent should do.\n");
+    out.push_str("\"\"\"\n");
+    out.push_str("scope = \"narrow\"\n");
+    out.push_str("gate = \"auto\"\n");
+
+    // Invariants array
+    if invariant_names.is_empty() {
+        out.push_str("invariants = []\n");
+    } else {
+        let quoted: Vec<String> = invariant_names.iter().map(|n| format!("{:?}", n)).collect();
+        out.push_str(&format!("invariants = [{}]\n", quoted.join(", ")));
+    }
+
+    out.push_str("# depends_on = []\n");
+    out.push_str("# retry_max = 3\n");
+    out.push_str("# harness = \"claude-code\"\n");
+
+    out
 }
 
 // -----------------------------------------------------------------------
@@ -293,6 +521,7 @@ async fn cmd_export(pool: &PgPool, plan_id_str: &str, output: Option<&str>) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn parse_valid_uuid() {
@@ -306,5 +535,138 @@ mod tests {
         let id = "not-a-uuid";
         let result: Result<Uuid, _> = id.parse();
         assert!(result.is_err());
+    }
+
+    // -- TOML generation tests --
+
+    #[test]
+    fn generate_plan_toml_with_invariants() {
+        let content = generate_plan_toml(
+            "my-feature",
+            "main",
+            &["rust_build", "rust_test", "rust_clippy"],
+        );
+
+        // Verify it parses as valid TOML.
+        let parsed: gator_core::plan::PlanToml =
+            toml::from_str(&content).expect("generated TOML should parse");
+        assert_eq!(parsed.plan.name, "my-feature");
+        assert_eq!(parsed.plan.base_branch, "main");
+        assert_eq!(parsed.tasks.len(), 1);
+        assert_eq!(parsed.tasks[0].name, "task-1");
+        assert_eq!(
+            parsed.tasks[0].invariants,
+            vec!["rust_build", "rust_test", "rust_clippy"]
+        );
+    }
+
+    #[test]
+    fn generate_plan_toml_no_invariants() {
+        let content = generate_plan_toml("empty-plan", "develop", &[]);
+
+        let parsed: gator_core::plan::PlanToml =
+            toml::from_str(&content).expect("generated TOML should parse");
+        assert_eq!(parsed.plan.name, "empty-plan");
+        assert_eq!(parsed.plan.base_branch, "develop");
+        assert!(parsed.tasks[0].invariants.is_empty());
+    }
+
+    #[test]
+    fn generate_plan_toml_contains_comments() {
+        let content = generate_plan_toml("test", "main", &[]);
+        // Comments should be present for optional fields.
+        assert!(content.contains("# token_budget"));
+        assert!(content.contains("# isolation"));
+        assert!(content.contains("# container_image"));
+        assert!(content.contains("# depends_on"));
+        assert!(content.contains("# retry_max"));
+        assert!(content.contains("# harness"));
+    }
+
+    #[test]
+    fn generate_plan_toml_special_chars_in_name() {
+        let content = generate_plan_toml("add-user-auth", "main", &[]);
+        let parsed: gator_core::plan::PlanToml =
+            toml::from_str(&content).expect("generated TOML should parse");
+        assert_eq!(parsed.plan.name, "add-user-auth");
+    }
+
+    // -- CLI parsing tests --
+
+    #[derive(Parser)]
+    #[command(name = "gator")]
+    struct TestCli {
+        #[command(subcommand)]
+        command: TestCommands,
+    }
+
+    #[derive(clap::Subcommand)]
+    enum TestCommands {
+        Plan {
+            #[command(subcommand)]
+            command: PlanCommands,
+        },
+    }
+
+    #[test]
+    fn clap_parses_plan_init() {
+        let cli =
+            TestCli::try_parse_from(["gator", "plan", "init", "my-feature"]).expect("should parse");
+        match cli.command {
+            TestCommands::Plan {
+                command:
+                    PlanCommands::Init {
+                        name,
+                        project_type,
+                        no_register,
+                        output,
+                    },
+            } => {
+                assert_eq!(name, "my-feature");
+                assert!(project_type.is_none());
+                assert!(!no_register);
+                assert!(output.is_none());
+            }
+            _ => panic!("expected Plan Init"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_plan_init_with_options() {
+        let cli = TestCli::try_parse_from([
+            "gator",
+            "plan",
+            "init",
+            "my-feature",
+            "--project-type",
+            "rust",
+            "--no-register",
+            "--output",
+            "custom.toml",
+        ])
+        .expect("should parse");
+        match cli.command {
+            TestCommands::Plan {
+                command:
+                    PlanCommands::Init {
+                        name,
+                        project_type,
+                        no_register,
+                        output,
+                    },
+            } => {
+                assert_eq!(name, "my-feature");
+                assert_eq!(project_type.as_deref(), Some("rust"));
+                assert!(no_register);
+                assert_eq!(output.as_deref(), Some("custom.toml"));
+            }
+            _ => panic!("expected Plan Init"),
+        }
+    }
+
+    #[test]
+    fn clap_plan_init_missing_name_fails() {
+        let result = TestCli::try_parse_from(["gator", "plan", "init"]);
+        assert!(result.is_err(), "missing name should fail");
     }
 }
