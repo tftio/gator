@@ -374,7 +374,36 @@ pub async fn run_orchestrator(
                 }
             }
         } else if !spawned_any {
-            // Nothing in flight, nothing spawned this iteration.
+            // Nothing in flight, nothing spawned. If there are still pending
+            // tasks they must be blocked by escalated dependencies and can
+            // never become ready -- the plan is deadlocked.
+            if progress.pending > 0 {
+                let tasks = task_db::list_tasks_for_plan(pool, plan_id).await?;
+                let mut blocked: Vec<String> = Vec::new();
+                for task in &tasks {
+                    if task.status == TaskStatus::Pending {
+                        blocked.push(task.name.clone());
+                    }
+                }
+                let escalated: Vec<String> = tasks
+                    .iter()
+                    .filter(|t| t.status == TaskStatus::Escalated)
+                    .map(|t| t.name.clone())
+                    .collect();
+                tracing::warn!(
+                    plan_id = %plan_id,
+                    ?blocked,
+                    ?escalated,
+                    "plan deadlocked: pending tasks blocked by escalated dependencies"
+                );
+                let mut all_failed = escalated;
+                all_failed.extend(blocked);
+                plan_db::update_plan_status(pool, plan_id, PlanStatus::Failed).await?;
+                return Ok(OrchestratorResult::Failed {
+                    failed_tasks: all_failed,
+                });
+            }
+
             // Brief sleep to avoid busy-loop before re-checking.
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {}

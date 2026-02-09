@@ -8,6 +8,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   GATOR_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gator_ci
+  # Tests use this to skip testcontainers and connect to the service container.
+  GATOR_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432
 
 jobs:
   check:
@@ -16,7 +18,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -53,5 +55,8 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace -- -D warnings
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci

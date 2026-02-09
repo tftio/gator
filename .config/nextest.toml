@@ -1,0 +1,25 @@
+experimental = ["setup-scripts"]
+
+[store]
+dir = "target/nextest"
+
+# Setup script: starts a single PostgreSQL container shared by all tests.
+# Each test creates its own database within it via gator-test-utils.
+[scripts.setup.start-pg]
+command = { command-line = "scripts/start-test-pg.sh", relative-to = "workspace-root" }
+
+[profile.default]
+fail-fast = true
+# Kill any test that hangs longer than 60s.
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+# All integration tests and serve_cmd unit tests depend on start-pg.
+[[profile.default.scripts]]
+filter = '(package(gator-db) & kind(test)) | (package(gator-core) & kind(test)) | (package(gator-cli) & kind(test)) | test(/serve_cmd/)'
+setup = 'start-pg'
+
+[profile.ci]
+# CI sets GATOR_TEST_PG_URL directly via service container, no setup script needed.
+fail-fast = false
+retries = 1
+slow-timeout = { period = "60s", terminate-after = 2 }
