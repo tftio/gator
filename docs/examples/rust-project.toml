@@ -1,0 +1,106 @@
+# Realistic gator plan for a Rust project.
+#
+# This plan adds a user authentication module with a diamond-shaped DAG:
+#
+#         define-types
+#          /       \
+#   impl-jwt    impl-password
+#          \       /
+#       add-login-endpoint
+#
+# Tasks at the tips of the diamond run in parallel. The final task
+# waits for both to finish before it starts.
+
+[plan]
+name = "Add user authentication"
+base_branch = "main"
+
+# Optional: cap total token spend across all agents (input + output).
+# Omit for unlimited.
+token_budget = 500000
+
+# Default harness for tasks that don't override it.
+# Supported: "claude-code", "codex-cli", "open-code"
+default_harness = "claude-code"
+
+# Isolation strategy: "worktree" (git worktree per task) or "container".
+isolation = "worktree"
+
+# -- Task 1: no dependencies, runs immediately --------------------------
+
+[[tasks]]
+name = "define-types"
+description = """
+Create src/auth/types.rs with the following types:
+
+- `UserId(Uuid)` newtype
+- `HashedPassword(String)` newtype
+- `Claims { sub: UserId, exp: i64 }` for JWT payloads
+- `AuthError` enum with variants: InvalidCredentials, TokenExpired, TokenMalformed
+
+Add #[derive(Debug, Clone, PartialEq, Eq)] to all types.
+Use thiserror for AuthError.
+"""
+scope = "narrow"
+gate = "auto"
+retry_max = 3
+invariants = ["rust_build", "rust_test", "rust_clippy"]
+
+# -- Task 2: depends on types, runs in parallel with task 3 -------------
+
+[[tasks]]
+name = "impl-jwt"
+description = """
+Create src/auth/jwt.rs implementing:
+
+- `sign(claims: &Claims, secret: &[u8]) -> Result<String, AuthError>`
+  using the `jsonwebtoken` crate with HS256.
+- `verify(token: &str, secret: &[u8]) -> Result<Claims, AuthError>`
+  that maps expiration errors to AuthError::TokenExpired.
+
+Add unit tests for sign/verify round-trip and expired token rejection.
+"""
+scope = "narrow"
+gate = "auto"
+depends_on = ["define-types"]
+invariants = ["rust_build", "rust_test", "rust_clippy"]
+
+# -- Task 3: depends on types, runs in parallel with task 2 -------------
+
+[[tasks]]
+name = "impl-password"
+description = """
+Create src/auth/password.rs implementing:
+
+- `hash(plain: &str) -> Result<HashedPassword>` using argon2.
+- `verify(plain: &str, hashed: &HashedPassword) -> Result<bool>`
+
+Add unit tests with a known test vector.
+"""
+scope = "narrow"
+gate = "auto"
+depends_on = ["define-types"]
+invariants = ["rust_build", "rust_test", "rust_clippy"]
+
+# -- Task 4: depends on both jwt and password (diamond join) -------------
+
+[[tasks]]
+name = "add-login-endpoint"
+description = """
+Create src/auth/handler.rs with a POST /login endpoint:
+
+1. Accept JSON body: { "email": string, "password": string }
+2. Look up the user by email in the database.
+3. Verify the password with password::verify().
+4. Generate a JWT with jwt::sign().
+5. Return 200 with JSON: { "token": string }
+6. Return 401 with AuthError::InvalidCredentials on failure.
+
+Wire the handler into the existing router in src/main.rs.
+Add an integration test using the test database helper.
+"""
+scope = "medium"
+gate = "human_review"
+retry_max = 2
+depends_on = ["impl-jwt", "impl-password"]
+invariants = ["rust_build", "rust_test", "rust_clippy"]

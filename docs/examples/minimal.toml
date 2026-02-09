@@ -1,0 +1,12 @@
+# Minimal gator plan: one task, no dependencies, only required fields.
+
+[plan]
+name = "Fix typo in README"
+base_branch = "main"
+
+[[tasks]]
+name = "fix-readme-typo"
+description = "Fix the misspelling of 'authentication' in README.md line 42."
+scope = "narrow"
+gate = "auto"
+invariants = ["rust_build"]

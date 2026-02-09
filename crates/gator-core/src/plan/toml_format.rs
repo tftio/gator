@@ -241,4 +241,45 @@ gate = "auto"
         assert_eq!(plan.plan.default_harness, "claude-code");
         assert_eq!(plan.plan.isolation, "worktree");
     }
+
+    /// Helper to resolve a path relative to the workspace root.
+    fn workspace_root() -> std::path::PathBuf {
+        // CARGO_MANIFEST_DIR is crates/gator-core; go up two levels.
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
+    #[test]
+    fn parse_example_minimal_toml() {
+        let path = workspace_root().join("docs/examples/minimal.toml");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        let plan: PlanToml = toml::from_str(&content)
+            .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
+        assert!(!plan.plan.name.is_empty());
+        assert!(!plan.tasks.is_empty());
+    }
+
+    #[test]
+    fn parse_example_rust_project_toml() {
+        let path = workspace_root().join("docs/examples/rust-project.toml");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        let plan: PlanToml = toml::from_str(&content)
+            .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
+        assert_eq!(plan.plan.name, "Add user authentication");
+        assert_eq!(plan.tasks.len(), 4);
+        // Verify the diamond DAG structure.
+        assert!(plan.tasks[0].depends_on.is_empty(), "define-types has no deps");
+        assert_eq!(plan.tasks[1].depends_on, vec!["define-types"]);
+        assert_eq!(plan.tasks[2].depends_on, vec!["define-types"]);
+        assert_eq!(
+            plan.tasks[3].depends_on,
+            vec!["impl-jwt", "impl-password"],
+        );
+    }
 }

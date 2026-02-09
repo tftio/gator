@@ -455,4 +455,33 @@ gate = "{gate}"
                 .unwrap_or_else(|e| panic!("gate {gate:?} should be valid: {e}"));
         }
     }
+
+    /// Helper to resolve a path relative to the workspace root.
+    fn workspace_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
+    #[test]
+    fn validate_example_minimal_toml() {
+        let path = workspace_root().join("docs/examples/minimal.toml");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        parse_plan_toml(&content)
+            .unwrap_or_else(|e| panic!("docs/examples/minimal.toml failed validation: {e}"));
+    }
+
+    #[test]
+    fn validate_example_rust_project_toml() {
+        let path = workspace_root().join("docs/examples/rust-project.toml");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        let plan = parse_plan_toml(&content)
+            .unwrap_or_else(|e| panic!("docs/examples/rust-project.toml failed validation: {e}"));
+        assert_eq!(plan.tasks.len(), 4, "rust-project.toml should have 4 tasks");
+    }
 }
