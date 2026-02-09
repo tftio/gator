@@ -1,0 +1,363 @@
+[plan]
+name = "add-gator-serve"
+base_branch = "main"
+default_harness = "claude-code"
+isolation = "worktree"
+
+# -- Task 1: add axum deps to workspace and CLI crate --------------------
+
+[[tasks]]
+name = "add-dependencies"
+description = """
+Add HTTP server dependencies to the gator workspace.
+
+1. In the workspace root `Cargo.toml`, add to `[workspace.dependencies]`:
+   ```toml
+   axum = "0.8"
+   tower-http = { version = "0.6", features = ["cors"] }
+   ```
+
+2. In `crates/gator-cli/Cargo.toml`, add to `[dependencies]`:
+   ```toml
+   axum.workspace = true
+   tower-http.workspace = true
+   ```
+
+3. Also add `tower` as a dev-dependency in `crates/gator-cli/Cargo.toml` for testing
+   (needed for `tower::ServiceExt::oneshot` in tests):
+   ```toml
+   [dev-dependencies]
+   tower = { version = "0.5", features = ["util"] }
+   ```
+
+4. Run `cargo check --workspace` to verify it compiles.
+
+Do NOT modify any Rust source files. Only Cargo.toml files.
+"""
+scope = "narrow"
+gate = "auto"
+invariants = ["cargo_check"]
+
+# -- Task 2: skeleton module with tests ----------------------------------
+
+[[tasks]]
+name = "write-serve-tests"
+description = """
+Create `crates/gator-cli/src/serve_cmd.rs` with a skeleton module and comprehensive tests. The tests define the contract for the HTTP API -- a later task will implement the handlers to make them pass.
+
+## What to create
+
+A single file: `crates/gator-cli/src/serve_cmd.rs`
+
+Also add `mod serve_cmd;` to the module declarations at the top of `crates/gator-cli/src/main.rs` (alongside the existing `mod agent;`, `mod cleanup_cmd;`, etc.). This is needed so cargo can compile the module.
+
+## Skeleton structure (non-test code)
+
+The module must include the following public API surface. Handlers should be stubs that return `StatusCode::INTERNAL_SERVER_ERROR` for now -- the next task will fill them in.
+
+### Error type
+
+`AppError` with a `StatusCode` and `String` message. Implement `axum::response::IntoResponse` to return JSON `{"error": "..."}` with the status code. Add constructors:
+- `AppError::not_found(msg: impl Into<String>)` -- 404
+- `AppError::internal(err: anyhow::Error)` -- 500
+
+### Response types
+
+`PlanProgress` in `gator_db::queries::tasks` does NOT derive `Serialize`, so create serializable wrappers:
+
+- `ProgressResponse` -- mirrors PlanProgress fields (pending, assigned, running, checking, passed, failed, escalated, total: all i64), impl `From<gator_db::queries::tasks::PlanProgress>`
+- `TokenUsageResponse` -- `{ input_tokens: i64, output_tokens: i64, total_tokens: i64 }`
+- `PlanSummaryResponse` -- `#[serde(flatten)] plan: Plan, progress: ProgressResponse`
+- `PlanDetailResponse` -- `#[serde(flatten)] plan: Plan, progress: ProgressResponse, token_usage: TokenUsageResponse, tasks: Vec<Task>`
+- `TaskDetailResponse` -- `#[serde(flatten)] task: Task, dependencies: Vec<Uuid>, invariants: Vec<Invariant>, events: Vec<AgentEvent>, gate_results: Vec<GateResultWithName>, token_usage: TokenUsageResponse`
+
+All response types derive `Debug, Serialize`.
+
+### Router
+
+```rust
+pub fn build_router(pool: PgPool) -> Router {
+    Router::new()
+        .route("/", get(index))
+        .route("/api/plans", get(list_plans))
+        .route("/api/plans/{id}", get(get_plan_detail))
+        .route("/api/tasks/{id}", get(get_task_detail))
+        .route("/api/invariants", get(list_invariants_handler))
+        .layer(CorsLayer::permissive())
+        .with_state(pool)
+}
+```
+
+Use axum 0.8 path syntax `{id}` (NOT `:id`).
+
+### Entry point
+
+```rust
+pub async fn run_serve(pool: PgPool, bind: &str, port: u16) -> Result<()> {
+    let app = build_router(pool);
+    let addr: SocketAddr = format!("{bind}:{port}").parse()?;
+    tracing::info!("gator serve listening on http://{addr}");
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    tracing::info!("gator serve shut down");
+    Ok(())
+}
+```
+
+Where `shutdown_signal()` awaits `tokio::signal::ctrl_c()`.
+
+### Handler stubs
+
+Each handler (index, list_plans, get_plan_detail, get_task_detail, list_invariants_handler) should be a stub that returns `StatusCode::INTERNAL_SERVER_ERROR` with a JSON body `{"error": "not implemented"}`. Use proper axum handler signatures with `State(pool): State<PgPool>` and `Path(id): Path<Uuid>` extractors.
+
+## Tests (`#[cfg(test)] mod tests`)
+
+Write tests inside `serve_cmd.rs` as `#[cfg(test)] mod tests { ... }`. These tests use a real PostgreSQL database following the project's existing test patterns.
+
+### Test database setup
+
+Copy the existing `create_temp_db` / `drop_temp_db` pattern used throughout the project:
+
+```rust
+use std::time::Duration;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Executor, PgPool};
+use gator_db::config::DbConfig;
+use gator_db::pool;
+
+async fn create_temp_db() -> (PgPool, String) {
+    let base_config = DbConfig::from_env();
+    let maint_url = base_config.maintenance_url();
+    let maint_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect(&maint_url)
+        .await
+        .expect("failed to connect to maintenance database");
+    let db_name = format!("gator_test_{}", uuid::Uuid::new_v4().simple());
+    maint_pool.execute(format!("CREATE DATABASE {db_name}").as_str()).await
+        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
+    maint_pool.close().await;
+    let temp_url = match base_config.database_url.rfind('/') {
+        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
+        None => panic!("cannot parse database URL"),
+    };
+    let temp_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect(&temp_url)
+        .await
+        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
+    pool::run_migrations(&temp_pool, pool::default_migrations_path())
+        .await
+        .expect("migrations should succeed");
+    (temp_pool, db_name)
+}
+
+async fn drop_temp_db(db_name: &str) {
+    let base_config = DbConfig::from_env();
+    let maint_url = base_config.maintenance_url();
+    let maint_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect(&maint_url)
+        .await
+        .expect("cleanup connect failed");
+    let _ = maint_pool.execute(
+        format!("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_name}' AND pid <> pg_backend_pid()").as_str()
+    ).await;
+    let _ = maint_pool.execute(format!("DROP DATABASE IF EXISTS {db_name}").as_str()).await;
+    maint_pool.close().await;
+}
+```
+
+### Test helper for HTTP requests
+
+Use `tower::ServiceExt::oneshot` to send requests to the router:
+
+```rust
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use tower::ServiceExt;
+
+async fn send_request(pool: PgPool, uri: &str) -> axum::response::Response {
+    let app = super::build_router(pool);
+    app.oneshot(
+        Request::builder()
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+```
+
+### Test helper for reading response body as JSON
+
+```rust
+async fn body_json(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), 1_048_576).await.unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+```
+
+### Required tests
+
+Write these `#[tokio::test]` functions. Each creates its own temp DB. Use `gator_db::queries::plans::insert_plan` and `gator_db::queries::tasks::insert_task` to create test data.
+
+1. **`test_index_returns_html`** -- GET / returns 200 with content-type containing "text/html".
+
+2. **`test_list_plans_empty`** -- GET /api/plans on an empty DB returns 200 with an empty JSON array `[]`.
+
+3. **`test_list_plans_with_data`** -- Insert a plan, GET /api/plans returns 200, response is a JSON array with one object containing `"name"` matching the inserted plan name, and a `"progress"` object with `"total"` field.
+
+4. **`test_get_plan_detail`** -- Insert a plan and a task, GET /api/plans/{plan_id} returns 200, response has `"name"` matching the plan, `"tasks"` array with one entry, `"progress"` object, and `"token_usage"` object.
+
+5. **`test_get_plan_not_found`** -- GET /api/plans/{random-uuid} returns 404.
+
+6. **`test_get_task_detail`** -- Insert a plan and task, GET /api/tasks/{task_id} returns 200, response has `"name"` matching the task, plus `"dependencies"`, `"invariants"`, `"events"`, `"gate_results"`, and `"token_usage"` fields.
+
+7. **`test_get_task_not_found`** -- GET /api/tasks/{random-uuid} returns 404.
+
+8. **`test_list_invariants_empty`** -- GET /api/invariants on an empty DB returns 200 with `[]`.
+
+9. **`test_list_invariants_with_data`** -- Insert an invariant using `gator_db::queries::invariants::insert_invariant` with a `NewInvariant`, GET /api/invariants returns 200, array contains one object with matching `"name"`.
+
+Each test must call `pool.close().await` then `drop_temp_db(&db_name).await` for cleanup.
+
+## Important
+
+- The tests will FAIL when run (`cargo test`) because the handlers are stubs. That is intentional -- the next task implements the handlers.
+- But `cargo check --workspace` must PASS (stubs are valid Rust, tests are behind #[cfg(test)]).
+- Do NOT add a `Serve` variant to Commands or touch the match block -- that is a later task.
+"""
+scope = "narrow"
+gate = "auto"
+depends_on = ["add-dependencies"]
+invariants = ["cargo_check"]
+
+# -- Task 3: implement handlers to make tests pass -----------------------
+
+[[tasks]]
+name = "implement-handlers"
+description = """
+Replace the stub handlers in `crates/gator-cli/src/serve_cmd.rs` with real implementations. All tests written in the previous task must pass.
+
+## Handler implementations
+
+Replace each stub handler with a real implementation that queries the database using gator_db query functions.
+
+### `index` handler (GET /)
+
+Query `plan_db::list_plans(&pool)`. Return minimal inline HTML (no external CSS/JS) with:
+- Page title "gator"
+- Links to /api/plans and /api/invariants
+- A table listing plans with columns: Plan name (linked to /api/plans/{id}), Status, ID
+- If no plans, show "No plans found."
+
+### `list_plans` handler (GET /api/plans)
+
+Query `plan_db::list_plans(&pool)`, then for each plan query `task_db::get_plan_progress(&pool, plan.id)`. Return `Json<Vec<PlanSummaryResponse>>`.
+
+### `get_plan_detail` handler (GET /api/plans/{id})
+
+1. `plan_db::get_plan(&pool, id)` -- return 404 if None
+2. `task_db::get_plan_progress(&pool, id)`
+3. `task_db::list_tasks_for_plan(&pool, id)`
+4. `agent_events::get_token_usage_for_plan(&pool, id)` -- returns `(i64, i64)` for (input, output)
+
+Return `Json<PlanDetailResponse>`.
+
+### `get_task_detail` handler (GET /api/tasks/{id})
+
+1. `task_db::get_task(&pool, id)` -- return 404 if None
+2. `task_db::get_task_dependencies(&pool, id)` -- returns `Vec<Uuid>`
+3. `invariant_db::get_invariants_for_task(&pool, id)` -- returns `Vec<Invariant>`
+4. `agent_events::list_all_events_for_task(&pool, id)` -- returns `Vec<AgentEvent>`
+5. `gate_results::get_latest_gate_results(&pool, id)` -- returns `Vec<GateResultWithName>`
+6. `agent_events::get_token_usage_for_task(&pool, id)` -- returns `(i64, i64)`
+
+Return `Json<TaskDetailResponse>`.
+
+### `list_invariants_handler` handler (GET /api/invariants)
+
+Query `invariant_db::list_invariants(&pool)`. Return `Json<Vec<Invariant>>` directly (the model already derives Serialize).
+
+## Imports
+
+```rust
+use gator_db::models::{AgentEvent, Invariant, Plan, Task};
+use gator_db::queries::{
+    agent_events,
+    gate_results::{self, GateResultWithName},
+    invariants as invariant_db,
+    plans as plan_db,
+    tasks as task_db,
+};
+```
+
+## Error handling pattern
+
+Use `map_err(AppError::internal)` for DB errors and `ok_or_else(|| AppError::not_found(...))` for missing resources. Example:
+
+```rust
+let plan = plan_db::get_plan(&pool, id)
+    .await
+    .map_err(AppError::internal)?
+    .ok_or_else(|| AppError::not_found(format!("plan {id} not found")))?;
+```
+
+## Verification
+
+Run `cargo test --workspace` -- ALL tests must pass, including the serve_cmd tests from the previous task. Do not modify the tests, only the handler implementations.
+"""
+scope = "narrow"
+gate = "auto"
+depends_on = ["write-serve-tests"]
+invariants = ["cargo_test"]
+
+# -- Task 4: wire into main.rs ------------------------------------------
+
+[[tasks]]
+name = "wire-main"
+description = """
+Wire the serve command into the CLI by modifying `crates/gator-cli/src/main.rs`.
+
+NOTE: `mod serve_cmd;` was already added in an earlier task. Do NOT add it again.
+
+1. Add a `Serve` variant to the `Commands` enum:
+   ```rust
+   /// Start a read-only HTTP server for browsing gator state
+   Serve {
+       /// Port to listen on
+       #[arg(long, default_value_t = 3000)]
+       port: u16,
+       /// Address to bind to
+       #[arg(long, default_value = "127.0.0.1")]
+       bind: String,
+   },
+   ```
+   Place it after the `Completions` variant and before `Dashboard`.
+
+2. Add a match arm in the operator-mode dispatch block (the `match cli.command { ... }` in `main()`), placed before the `Dashboard` arm:
+   ```rust
+   Commands::Serve { port, bind } => {
+       let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+       let db_pool = pool::create_pool(&resolved.db_config).await?;
+       let result = serve_cmd::run_serve(db_pool.clone(), &bind, port).await;
+       db_pool.close().await;
+       result?;
+   }
+   ```
+
+3. Run `cargo fmt --all` after making changes.
+
+Do NOT modify serve_cmd.rs or any other files. The agent-mode catch-all in agent.rs automatically rejects the new command in agent mode.
+"""
+scope = "narrow"
+gate = "auto"
+depends_on = ["implement-handlers"]
+invariants = ["cargo_fmt", "cargo_clippy", "cargo_test"]

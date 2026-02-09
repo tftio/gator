@@ -9,6 +9,7 @@ mod merge_cmd;
 mod plan_cmds;
 mod pr_cmd;
 mod report_cmd;
+mod serve_cmd;
 mod status_cmd;
 mod tui;
 
@@ -138,6 +139,15 @@ pub enum Commands {
     Completions {
         /// Shell to generate completions for
         shell: Shell,
+    },
+    /// Start a read-only HTTP server for browsing gator state
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+        /// Address to bind to
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
     },
     /// Launch interactive TUI dashboard
     Dashboard,
@@ -461,6 +471,13 @@ async fn main() -> anyhow::Result<()> {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "gator", &mut std::io::stdout());
         }
+        Commands::Serve { port, bind } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = serve_cmd::run_serve(db_pool.clone(), &bind, port).await;
+            db_pool.close().await;
+            result?;
+        }
         Commands::Dashboard => {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
             let db_pool = pool::create_pool(&resolved.db_config).await?;
@@ -484,4 +501,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Shared test utilities for tests that modify process-global state (env vars).
+#[cfg(test)]
+pub(crate) mod test_util {
+    use std::sync::Mutex;
+
+    /// Global mutex for all tests that read/write environment variables.
+    /// Use `lock_env()` to acquire, which recovers from poisoned state.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }

@@ -373,7 +373,6 @@ fn require_db(pool: Option<&PgPool>) -> Result<&PgPool> {
 mod tests {
     use gator_core::token::guard::{self, AGENT_TOKEN_ENV};
     use gator_core::token::{TokenConfig, generate_token};
-    use std::sync::Mutex;
     use uuid::Uuid;
 
     use crate::Commands;
@@ -382,12 +381,9 @@ mod tests {
         TokenConfig::new(b"agent-mode-test-secret".to_vec())
     }
 
-    // Mutex to serialize tests that modify environment variables.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
     #[test]
     fn operator_commands_rejected_when_token_set() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -407,7 +403,7 @@ mod tests {
 
     #[test]
     fn operator_commands_allowed_when_no_token() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::remove_var(AGENT_TOKEN_ENV) };
@@ -421,7 +417,7 @@ mod tests {
 
     #[test]
     fn invalid_token_rejected() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
 
         // SAFETY: serialized by mutex, test-only code.
@@ -435,7 +431,7 @@ mod tests {
 
     #[test]
     fn valid_token_accepted() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let attempt = 1;
@@ -458,7 +454,7 @@ mod tests {
 
     #[test]
     fn tampered_token_rejected() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let mut token = generate_token(&config, task_id, 1);
@@ -478,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_rejects_init_command() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -508,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_rejects_plan_command() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -537,7 +533,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_rejects_invariant_command() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -566,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_task_requires_db() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -590,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_check_requires_db() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -613,7 +609,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_progress_requires_db() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);
@@ -642,7 +638,7 @@ mod tests {
 
     #[tokio::test]
     async fn agent_mode_done_requires_db() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = crate::test_util::lock_env();
         let config = test_config();
         let task_id = Uuid::new_v4();
         let token = generate_token(&config, task_id, 0);

@@ -160,10 +160,10 @@ impl GatorConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    // Mutex to serialize tests that modify env vars or the filesystem.
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_util::lock_env()
+    }
 
     #[test]
     fn generate_token_secret_is_64_hex_chars() {
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn save_and_load_config_roundtrip() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_env();
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("gator");
         let path = dir.join("config.toml");
@@ -216,7 +216,7 @@ mod tests {
     fn save_config_sets_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_env();
 
         // We test save_config by temporarily pointing HOME so config_dir
         // returns a temp path. Instead, test the permission-setting logic
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn resolve_with_cli_flag_overrides_all() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_env();
 
         // Even if env var is set, CLI flag wins.
         unsafe { std::env::set_var("GATOR_DATABASE_URL", "postgresql://env:5432/envdb") };
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn resolve_with_env_var_overrides_config_file() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_env();
 
         unsafe { std::env::set_var("GATOR_DATABASE_URL", "postgresql://env:5432/envdb") };
         unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "test-secret-for-resolve") };
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn resolve_defaults_db_url_when_nothing_set() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_env();
 
         unsafe { std::env::remove_var("GATOR_DATABASE_URL") };
         unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "test-secret-for-resolve") };
@@ -276,12 +276,22 @@ mod tests {
 
     #[test]
     fn resolve_errors_when_no_token_secret() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_env();
 
         unsafe { std::env::remove_var("GATOR_TOKEN_SECRET") };
-        // Also ensure no config file is loadable (it won't be in CI).
+        // Point HOME to a temp dir so load_config() cannot find a real config file.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let orig_home = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", tmp.path()) };
 
         let result = GatorConfig::resolve(Some("postgresql://localhost:5432/gator"));
+
+        // Restore HOME before asserting, to avoid poisoning the mutex on failure.
+        match orig_home {
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
         assert!(result.is_err(), "should error when no token secret");
         let msg = result.unwrap_err().to_string();
         assert!(

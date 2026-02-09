@@ -32,6 +32,9 @@ clap_complete.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tokio-util.workspace = true
+axum.workspace = true
+tower-http.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tower.workspace = true

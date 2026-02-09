@@ -49,5 +49,9 @@ ratatui = "0.29"
 crossterm = "0.28"
 # Shell completions
 clap_complete = "4"
+# HTTP server
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
 # Testing
 tempfile = "3"

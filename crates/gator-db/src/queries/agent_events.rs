@@ -89,8 +89,8 @@ pub async fn list_all_events_for_task(pool: &PgPool, task_id: Uuid) -> Result<Ve
 pub async fn get_token_usage_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<(i64, i64)> {
     let row: (Option<i64>, Option<i64>) = sqlx::query_as(
         "SELECT \
-             COALESCE(SUM((ae.payload->>'input_tokens')::bigint), 0), \
-             COALESCE(SUM((ae.payload->>'output_tokens')::bigint), 0) \
+             COALESCE(SUM((ae.payload->>'input_tokens')::bigint), 0)::bigint, \
+             COALESCE(SUM((ae.payload->>'output_tokens')::bigint), 0)::bigint \
          FROM agent_events ae \
          JOIN tasks t ON t.id = ae.task_id \
          WHERE t.plan_id = $1 AND ae.event_type = 'token_usage'",
@@ -110,8 +110,8 @@ pub async fn get_token_usage_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<(i
 pub async fn get_token_usage_for_task(pool: &PgPool, task_id: Uuid) -> Result<(i64, i64)> {
     let row: (Option<i64>, Option<i64>) = sqlx::query_as(
         "SELECT \
-             COALESCE(SUM((payload->>'input_tokens')::bigint), 0), \
-             COALESCE(SUM((payload->>'output_tokens')::bigint), 0) \
+             COALESCE(SUM((payload->>'input_tokens')::bigint), 0)::bigint, \
+             COALESCE(SUM((payload->>'output_tokens')::bigint), 0)::bigint \
          FROM agent_events \
          WHERE task_id = $1 AND event_type = 'token_usage'",
     )
