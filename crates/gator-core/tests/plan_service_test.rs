@@ -3,87 +3,19 @@
 //! Tests `create_plan_from_toml` and `get_plan_with_tasks` against a real
 //! PostgreSQL database. Each test creates an isolated temporary database.
 
-use std::time::Duration;
-
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_core::plan::{
     create_plan_from_toml, get_plan_with_tasks, materialize_plan, materialize_task, parse_plan_toml,
 };
-use gator_db::config::DbConfig;
 use gator_db::models::PlanStatus;
-use gator_db::pool;
 use gator_db::queries::tasks;
-
-/// Helper: create a unique temporary database and return a pool pointing at it.
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-/// Helper: drop the temporary database.
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
-}
+use gator_test_utils::{create_test_db, drop_test_db};
 
 #[tokio::test]
 async fn create_plan_from_toml_inserts_plan_and_tasks() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -138,12 +70,12 @@ depends_on = ["task-a"]
     assert!(a_deps.is_empty());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn create_plan_warns_on_unknown_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -168,12 +100,12 @@ invariants = ["nonexistent_inv"]
     assert!(warnings[0].contains("nonexistent_inv"));
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn create_plan_links_existing_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Insert an invariant first.
     sqlx::query(
@@ -218,12 +150,12 @@ invariants = ["my_check", "missing_one"]
     assert_eq!(linked.0, 1);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_plan_with_tasks_returns_complete_data() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -262,23 +194,23 @@ depends_on = ["alpha"]
     assert_eq!(alpha.retry_max, 5);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_plan_with_tasks_fails_for_missing_plan() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let result = get_plan_with_tasks(&pool, Uuid::new_v4()).await;
     assert!(result.is_err());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn create_plan_with_diamond_dependencies() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -334,7 +266,7 @@ depends_on = ["left", "right"]
     assert_eq!(merge_deps, expected);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -343,7 +275,7 @@ depends_on = ["left", "right"]
 
 #[tokio::test]
 async fn roundtrip_parse_db_materialize_parse() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let original_toml = r#"
 [plan]
@@ -459,7 +391,7 @@ depends_on = ["task-alpha", "task-beta"]
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -468,7 +400,7 @@ depends_on = ["task-alpha", "task-beta"]
 
 #[tokio::test]
 async fn roundtrip_with_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Insert invariants into the DB first.
     sqlx::query(
@@ -538,7 +470,7 @@ invariants = ["rust_build"]
     assert_eq!(deploy_task.invariants, vec!["rust_build"]);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -547,7 +479,7 @@ invariants = ["rust_build"]
 
 #[tokio::test]
 async fn materialize_task_produces_clean_markdown() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Insert invariants.
     sqlx::query(
@@ -660,5 +592,5 @@ depends_on = ["root-task"]
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }

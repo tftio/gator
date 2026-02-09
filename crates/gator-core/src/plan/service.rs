@@ -35,8 +35,8 @@ pub async fn create_plan_from_toml(
 
     // 1. Insert the plan row.
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation) \
-         VALUES ($1, $2, $3, $4, $5, $6) \
+        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          RETURNING *",
     )
     .bind(&plan_toml.plan.name)
@@ -45,6 +45,7 @@ pub async fn create_plan_from_toml(
     .bind(plan_toml.plan.token_budget)
     .bind(&plan_toml.plan.default_harness)
     .bind(&plan_toml.plan.isolation)
+    .bind(&plan_toml.plan.container_image)
     .fetch_one(&mut *tx)
     .await
     .context("failed to insert plan")?;

@@ -36,5 +36,6 @@ axum.workspace = true
 tower-http.workspace = true
 
 [dev-dependencies]
+gator-test-utils = { path = "../gator-test-utils" }
 tempfile.workspace = true
 tower.workspace = true

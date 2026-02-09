@@ -18,4 +18,5 @@ tracing.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+gator-test-utils = { path = "../gator-test-utils" }
 tokio = { workspace = true, features = ["full"] }

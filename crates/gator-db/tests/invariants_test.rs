@@ -1,86 +1,15 @@
 //! Integration tests for invariant CRUD operations.
 //!
-//! These tests require a running PostgreSQL instance accessible via
-//! `GATOR_DATABASE_URL` (or the default `postgresql://localhost:5432/gator`).
-//!
-//! Each test creates a unique temporary database, runs migrations, and drops
-//! it on completion so tests are fully isolated and idempotent.
+//! Each test creates a unique temporary database inside a shared containerized
+//! PostgreSQL instance (via testcontainers), runs migrations, and drops it on
+//! completion so tests are fully isolated and idempotent.
 
-use std::time::Duration;
-
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
-use gator_db::config::DbConfig;
 use gator_db::models::{InvariantKind, InvariantScope};
-use gator_db::pool;
 use gator_db::queries::invariants::{self, NewInvariant};
 
-/// Helper: create a unique temporary database and return a pool pointing at it.
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-
-    // Run migrations.
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-/// Helper: drop the temporary database.
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
-}
+use gator_test_utils::{create_test_db, drop_test_db};
 
 /// Helper: build a NewInvariant with sensible defaults for testing.
 fn test_new_invariant(name: &str) -> NewInvariant<'_> {
@@ -101,7 +30,7 @@ fn test_new_invariant(name: &str) -> NewInvariant<'_> {
 
 #[tokio::test]
 async fn insert_and_get_invariant() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let new = test_new_invariant("rust_build");
     let inserted = invariants::insert_invariant(&pool, &new)
@@ -126,12 +55,12 @@ async fn insert_and_get_invariant() {
     assert_eq!(fetched.name, "rust_build");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_invariant_by_name() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let new = test_new_invariant("clippy_check");
     let inserted = invariants::insert_invariant(&pool, &new)
@@ -151,12 +80,12 @@ async fn get_invariant_by_name() {
     assert!(missing.is_none());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn list_invariants_empty_and_populated() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Initially empty.
     let list = invariants::list_invariants(&pool)
@@ -183,12 +112,12 @@ async fn list_invariants_empty_and_populated() {
     assert_eq!(list[1].name, "zzz_last");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn unique_name_constraint() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let new = test_new_invariant("unique_test");
     invariants::insert_invariant(&pool, &new)
@@ -200,12 +129,12 @@ async fn unique_name_constraint() {
     assert!(result.is_err(), "duplicate name should be rejected");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn delete_unlinked_invariant() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let new = test_new_invariant("deletable");
     let inserted = invariants::insert_invariant(&pool, &new)
@@ -224,12 +153,12 @@ async fn delete_unlinked_invariant() {
     assert!(fetched.is_none(), "invariant should be deleted");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn delete_nonexistent_invariant_fails() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let result = invariants::delete_invariant(&pool, Uuid::new_v4()).await;
     assert!(
@@ -238,12 +167,12 @@ async fn delete_nonexistent_invariant_fails() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn cannot_delete_linked_invariant() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Create an invariant.
     let new = test_new_invariant("linked_inv");
@@ -287,12 +216,12 @@ async fn cannot_delete_linked_invariant() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_invariants_for_task() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Create two invariants.
     let new_a = test_new_invariant("inv_alpha");
@@ -341,12 +270,12 @@ async fn get_invariants_for_task() {
     assert_eq!(linked[1].name, "inv_beta");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn link_task_invariant_is_idempotent() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let new = test_new_invariant("idem_inv");
     let inv = invariants::insert_invariant(&pool, &new)
@@ -384,12 +313,12 @@ async fn link_task_invariant_is_idempotent() {
     assert_eq!(linked.len(), 1, "should only be linked once");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn insert_invariant_with_all_fields() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let args = vec!["--workspace".to_owned(), "--release".to_owned()];
     let new = NewInvariant {
@@ -421,12 +350,12 @@ async fn insert_invariant_with_all_fields() {
     assert_eq!(inserted.scope, InvariantScope::Global);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_invariant_nonexistent_returns_none() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let result = invariants::get_invariant(&pool, Uuid::new_v4())
         .await
@@ -434,12 +363,12 @@ async fn get_invariant_nonexistent_returns_none() {
     assert!(result.is_none());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_invariants_for_task_with_no_links() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id: (Uuid,) = sqlx::query_as(
         "INSERT INTO plans (name, project_path, base_branch) \
@@ -464,5 +393,5 @@ async fn get_invariants_for_task_with_no_links() {
     assert!(linked.is_empty());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }

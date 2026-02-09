@@ -1,88 +1,15 @@
 //! Tests for the `agent_events` query module.
 
-use std::time::Duration;
-
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_db::queries::agent_events::{self, NewAgentEvent};
 
+use gator_test_utils::{create_test_db, drop_test_db};
+
 // ===========================================================================
 // Test harness
 // ===========================================================================
-
-async fn create_temp_db() -> (PgPool, String) {
-    let database_url = std::env::var("GATOR_DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://localhost:5432/gator".to_string());
-
-    // Connect to maintenance database to create temp DB.
-    let maint_url = match database_url.rfind('/') {
-        Some(pos) => format!("{}/postgres", &database_url[..pos]),
-        None => panic!("cannot parse GATOR_DATABASE_URL"),
-    };
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &database_url[..pos]),
-        None => panic!("cannot parse GATOR_DATABASE_URL"),
-    };
-
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp db: {e}"));
-
-    let migrations_path = gator_db::pool::default_migrations_path();
-    gator_db::pool::run_migrations(&pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (pool, db_name)
-}
-
-async fn drop_temp_db(db_name: &str) {
-    let database_url = std::env::var("GATOR_DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://localhost:5432/gator".to_string());
-
-    let maint_url = match database_url.rfind('/') {
-        Some(pos) => format!("{}/postgres", &database_url[..pos]),
-        None => return,
-    };
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
-}
 
 /// Create a plan and task so we have a valid task_id for FK constraints.
 async fn create_test_task(pool: &PgPool) -> Uuid {
@@ -94,6 +21,7 @@ async fn create_test_task(pool: &PgPool) -> Uuid {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .expect("insert plan");
@@ -120,7 +48,7 @@ async fn create_test_task(pool: &PgPool) -> Uuid {
 
 #[tokio::test]
 async fn insert_returns_correct_fields() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
     let task_id = create_test_task(&pool).await;
 
     let new = NewAgentEvent {
@@ -141,12 +69,12 @@ async fn insert_returns_correct_fields() {
     assert!(event.id > 0);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn list_ordered_by_recorded_at() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
     let task_id = create_test_task(&pool).await;
 
     // Insert 3 events in order.
@@ -177,12 +105,12 @@ async fn list_ordered_by_recorded_at() {
     assert_eq!(events[2].event_type, "event_2");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn list_empty_for_nonexistent_task() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let bogus_id = Uuid::new_v4();
     let events = agent_events::list_events_for_task(&pool, bogus_id, 0)
@@ -192,12 +120,12 @@ async fn list_empty_for_nonexistent_task() {
     assert!(events.is_empty());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn list_all_events_across_attempts() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
     let task_id = create_test_task(&pool).await;
 
     // Insert events for attempt 0 and attempt 1.
@@ -227,12 +155,12 @@ async fn list_all_events_across_attempts() {
     assert_eq!(all_events[3].attempt, 1);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn count_returns_correct_values() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
     let task_id = create_test_task(&pool).await;
 
     // Initially zero.
@@ -266,12 +194,12 @@ async fn count_returns_correct_values() {
     assert_eq!(count_other, 0);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn multiple_event_types_insert_correctly() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
     let task_id = create_test_task(&pool).await;
 
     let types = [
@@ -305,5 +233,5 @@ async fn multiple_event_types_insert_correctly() {
     }
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }

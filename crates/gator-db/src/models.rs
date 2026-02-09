@@ -332,6 +332,7 @@ pub struct Plan {
     pub token_budget: Option<i64>,
     pub default_harness: String,
     pub isolation: String,
+    pub container_image: Option<String>,
     pub created_at: DateTime<Utc>,
     pub approved_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,

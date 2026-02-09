@@ -305,79 +305,16 @@ async fn list_invariants_handler(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use sqlx::postgres::PgPoolOptions;
-    use sqlx::{Executor, PgPool};
+    use sqlx::PgPool;
     use tower::ServiceExt;
 
-    use gator_db::config::DbConfig;
     use gator_db::models::{InvariantKind, InvariantScope};
-    use gator_db::pool;
     use gator_db::queries::invariants::{NewInvariant, insert_invariant};
     use gator_db::queries::plans::insert_plan;
     use gator_db::queries::tasks::insert_task;
-
-    // -----------------------------------------------------------------------
-    // Test database helpers
-    // -----------------------------------------------------------------------
-
-    async fn create_temp_db() -> (PgPool, String) {
-        let base_config = DbConfig::from_env();
-        let maint_url = base_config.maintenance_url();
-        let maint_pool = PgPoolOptions::new()
-            .max_connections(1)
-            .acquire_timeout(Duration::from_secs(10))
-            .connect(&maint_url)
-            .await
-            .expect("failed to connect to maintenance database");
-        let db_name = format!("gator_test_{}", uuid::Uuid::new_v4().simple());
-        maint_pool
-            .execute(format!("CREATE DATABASE {db_name}").as_str())
-            .await
-            .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-        maint_pool.close().await;
-        let temp_url = match base_config.database_url.rfind('/') {
-            Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-            None => panic!("cannot parse database URL"),
-        };
-        let temp_pool = PgPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(Duration::from_secs(10))
-            .connect(&temp_url)
-            .await
-            .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-        pool::run_migrations(&temp_pool, pool::default_migrations_path())
-            .await
-            .expect("migrations should succeed");
-        (temp_pool, db_name)
-    }
-
-    async fn drop_temp_db(db_name: &str) {
-        let base_config = DbConfig::from_env();
-        let maint_url = base_config.maintenance_url();
-        let maint_pool = PgPoolOptions::new()
-            .max_connections(1)
-            .acquire_timeout(Duration::from_secs(10))
-            .connect(&maint_url)
-            .await
-            .expect("cleanup connect failed");
-        let _ = maint_pool
-            .execute(
-                format!(
-                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-                     WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-                )
-                .as_str(),
-            )
-            .await;
-        let _ = maint_pool
-            .execute(format!("DROP DATABASE IF EXISTS {db_name}").as_str())
-            .await;
-        maint_pool.close().await;
-    }
+    use gator_test_utils::{create_test_db, drop_test_db};
 
     // -----------------------------------------------------------------------
     // HTTP helpers
@@ -403,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_returns_html() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let resp = send_request(pool.clone(), "/").await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -419,12 +356,12 @@ mod tests {
         );
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_list_plans_empty() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let resp = send_request(pool.clone(), "/api/plans").await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -432,12 +369,12 @@ mod tests {
         assert_eq!(json, serde_json::json!([]));
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_list_plans_with_data() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let plan = insert_plan(
             &pool,
@@ -447,6 +384,7 @@ mod tests {
             None,
             "claude-code",
             "worktree",
+            None,
         )
         .await
         .expect("insert_plan should succeed");
@@ -467,12 +405,12 @@ mod tests {
         );
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_get_plan_detail() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let plan = insert_plan(
             &pool,
@@ -482,6 +420,7 @@ mod tests {
             None,
             "claude-code",
             "worktree",
+            None,
         )
         .await
         .expect("insert_plan should succeed");
@@ -515,24 +454,24 @@ mod tests {
         );
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_get_plan_not_found() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let random_id = uuid::Uuid::new_v4();
         let resp = send_request(pool.clone(), &format!("/api/plans/{random_id}")).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_get_task_detail() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let plan = insert_plan(
             &pool,
@@ -542,6 +481,7 @@ mod tests {
             None,
             "claude-code",
             "worktree",
+            None,
         )
         .await
         .expect("insert_plan should succeed");
@@ -582,24 +522,24 @@ mod tests {
         );
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_get_task_not_found() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let random_id = uuid::Uuid::new_v4();
         let resp = send_request(pool.clone(), &format!("/api/tasks/{random_id}")).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_list_invariants_empty() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let resp = send_request(pool.clone(), "/api/invariants").await;
         assert_eq!(resp.status(), StatusCode::OK);
@@ -607,12 +547,12 @@ mod tests {
         assert_eq!(json, serde_json::json!([]));
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 
     #[tokio::test]
     async fn test_list_invariants_with_data() {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
 
         let new_inv = NewInvariant {
             name: "cargo-check",
@@ -637,6 +577,6 @@ mod tests {
         assert_eq!(arr[0]["name"], "cargo-check");
 
         pool.close().await;
-        drop_temp_db(&db_name).await;
+        drop_test_db(&db_name).await;
     }
 }

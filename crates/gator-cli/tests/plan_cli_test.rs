@@ -4,83 +4,13 @@
 //! a real PostgreSQL instance. Each test creates an isolated temporary database
 //! and drops it on completion.
 
-use std::time::Duration;
-
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_core::plan::{create_plan_from_toml, get_plan_with_tasks, parse_plan_toml};
-use gator_db::config::DbConfig;
 use gator_db::models::PlanStatus;
-use gator_db::pool;
 use gator_db::queries::{invariants, plans, tasks};
-
-// -----------------------------------------------------------------------
-// Test-database helpers (same pattern as other integration tests)
-// -----------------------------------------------------------------------
-
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
-}
+use gator_test_utils::{create_test_db, drop_test_db};
 
 // -----------------------------------------------------------------------
 // Helper: create a plan from a TOML string directly (simulates what the
@@ -122,7 +52,7 @@ async fn insert_test_invariant(pool: &PgPool, name: &str) -> gator_db::models::I
 
 #[tokio::test]
 async fn create_plan_from_toml_and_verify() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -162,12 +92,12 @@ depends_on = ["task-a"]
     assert_eq!(dep_edges, 1);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn create_plan_warns_on_missing_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -192,12 +122,12 @@ invariants = ["nonexistent_invariant"]
     assert!(warnings[0].contains("nonexistent_invariant"));
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn create_plan_links_existing_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Insert an invariant first.
     let inv = insert_test_invariant(&pool, "my_check").await;
@@ -234,7 +164,7 @@ invariants = ["my_check"]
     assert_eq!(task_invs[0].id, inv.id);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -243,7 +173,7 @@ invariants = ["my_check"]
 
 #[tokio::test]
 async fn list_plans_returns_all() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Create two plans.
     let toml1 = r#"
@@ -282,7 +212,7 @@ gate = "human_approve"
     assert!(names.contains(&"Plan Two"));
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -291,7 +221,7 @@ gate = "human_approve"
 
 #[tokio::test]
 async fn show_plan_returns_tasks_and_dependencies() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -338,7 +268,7 @@ depends_on = ["alpha", "beta"]
     assert!(gamma_deps.contains(&"beta".to_string()));
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -347,7 +277,7 @@ depends_on = ["alpha", "beta"]
 
 #[tokio::test]
 async fn approve_plan_succeeds_when_all_tasks_have_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Insert an invariant.
     let _inv = insert_test_invariant(&pool, "build_check").await;
@@ -380,12 +310,12 @@ invariants = ["build_check"]
     assert!(approved.approved_at.is_some());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn approve_plan_fails_when_tasks_lack_invariants() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
 [plan]
@@ -409,12 +339,12 @@ gate = "auto"
     assert_eq!(tasks_without[0], "task-without-inv");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn approve_plan_fails_for_non_draft_plan() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Insert an invariant and create a plan with it.
     let _inv = insert_test_invariant(&pool, "check_a").await;
@@ -452,12 +382,12 @@ invariants = ["check_a"]
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn approve_plan_fails_for_nonexistent_plan() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let fake_id = Uuid::new_v4();
     let result = plans::approve_plan(&pool, fake_id).await;
@@ -469,7 +399,7 @@ async fn approve_plan_fails_for_nonexistent_plan() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -524,7 +454,7 @@ fn parse_file_not_found() {
 
 #[tokio::test]
 async fn full_create_show_approve_workflow() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // 1. Insert an invariant.
     let _inv = insert_test_invariant(&pool, "workflow_check").await;
@@ -592,7 +522,7 @@ invariants = ["workflow_check"]
     assert_eq!(reread.status, PlanStatus::Approved);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -601,7 +531,7 @@ invariants = ["workflow_check"]
 
 #[tokio::test]
 async fn count_dependency_edges_correct() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Diamond: a -> b, a -> c, b -> d, c -> d  (4 edges)
     let toml_str = r#"
@@ -644,5 +574,5 @@ depends_on = ["b", "c"]
     assert_eq!(edges, 4);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }

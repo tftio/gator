@@ -7,16 +7,13 @@
 //! it on completion so tests are fully isolated and idempotent.
 
 use std::path::Path;
-use std::time::Duration;
 
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use gator_db::config::DbConfig;
 use gator_db::models::TaskStatus;
-use gator_db::pool;
 use gator_db::queries::tasks as db;
+use gator_test_utils::{create_test_db, drop_test_db};
 
 use gator_core::state::TaskStateMachine;
 use gator_core::state::dispatch;
@@ -25,71 +22,6 @@ use gator_core::state::queries;
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
-
-/// Create a unique temporary database and return a pool pointing at it.
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-
-    // Run migrations.
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-/// Drop the temporary database.
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
-}
 
 /// Insert a plan and return its UUID.
 async fn create_test_plan(pool: &PgPool) -> Uuid {
@@ -188,7 +120,7 @@ fn invalid_transitions_rejected() {
 
 #[tokio::test]
 async fn happy_path_full_lifecycle() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "lifecycle-task", 3).await;
@@ -230,12 +162,12 @@ async fn happy_path_full_lifecycle() {
     assert!(t.completed_at.is_some(), "completed_at should be set");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn failure_and_retry_lifecycle() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "retry-task", 3).await;
@@ -268,12 +200,12 @@ async fn failure_and_retry_lifecycle() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn escalation_lifecycle() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "escalate-task", 3).await;
@@ -293,12 +225,12 @@ async fn escalation_lifecycle() {
     assert!(t.completed_at.is_some());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn invalid_transition_rejected_at_db_level() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "invalid-trans", 3).await;
@@ -319,12 +251,12 @@ async fn invalid_transition_rejected_at_db_level() {
     assert_eq!(t.status, TaskStatus::Pending);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn optimistic_lock_prevents_double_transition() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "double-trans", 3).await;
@@ -347,12 +279,12 @@ async fn optimistic_lock_prevents_double_transition() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn retry_respects_retry_max() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     // retry_max = 2 means attempts 0 and 1 are allowed; attempt 2 should fail
@@ -396,12 +328,12 @@ async fn retry_respects_retry_max() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn timestamps_set_correctly() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "timestamp-task", 3).await;
@@ -450,7 +382,7 @@ async fn timestamps_set_correctly() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +391,7 @@ async fn timestamps_set_correctly() {
 
 #[tokio::test]
 async fn dependency_check_blocks_assignment() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let dep_task = create_test_task(&pool, plan_id, "dep-task", 3).await;
@@ -496,7 +428,7 @@ async fn dependency_check_blocks_assignment() {
     assert_eq!(t.status, TaskStatus::Assigned);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -505,7 +437,7 @@ async fn dependency_check_blocks_assignment() {
 
 #[tokio::test]
 async fn get_ready_tasks_returns_correct_results() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task_a = create_test_task(&pool, plan_id, "task-a", 3).await;
@@ -549,12 +481,12 @@ async fn get_ready_tasks_returns_correct_results() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn plan_progress_and_completion() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task_a = create_test_task(&pool, plan_id, "prog-a", 3).await;
@@ -593,12 +525,12 @@ async fn plan_progress_and_completion() {
     assert!(queries::is_plan_complete(&pool, plan_id).await.unwrap());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn concurrent_transitions_handled_safely() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_id = create_test_plan(&pool).await;
     let task = create_test_task(&pool, plan_id, "concurrent-task", 3).await;
@@ -633,12 +565,12 @@ async fn concurrent_transitions_handled_safely() {
     assert_eq!(t.status, TaskStatus::Running);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn task_not_found_gives_clear_error() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let fake_id = Uuid::new_v4();
     let result =
@@ -653,5 +585,5 @@ async fn task_not_found_gives_clear_error() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }

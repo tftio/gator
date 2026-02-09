@@ -14,13 +14,10 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
 
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use uuid::Uuid;
 
-use gator_db::config::DbConfig;
 use gator_db::models::{InvariantKind, InvariantScope, PlanStatus, TaskStatus};
 use gator_db::pool;
 use gator_db::queries::gate_results;
@@ -38,6 +35,7 @@ use gator_core::state::queries as state_queries;
 use gator_core::token::guard;
 use gator_core::token::{self, TokenConfig};
 use gator_core::worktree::WorktreeManager;
+use gator_test_utils::{create_test_db, drop_test_db};
 
 // ===========================================================================
 // Test harness
@@ -56,7 +54,7 @@ impl TestHarness {
     /// Create a new harness: temp database (with migrations) + temp git repo
     /// (with an initial commit).
     async fn new() -> Self {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
         let (repo_dir, repo_path) = create_temp_git_repo();
         let worktree_base_dir =
             tempfile::TempDir::new().expect("failed to create worktree base dir");
@@ -97,78 +95,13 @@ impl TestHarness {
         self.pool.close().await;
 
         // Drop the temporary database.
-        drop_temp_db(&self.db_name).await;
+        drop_test_db(&self.db_name).await;
 
         // Temp directories are dropped automatically when `self` is dropped,
         // but we can be explicit.
         drop(self.worktree_base_dir);
         drop(self.repo_dir);
     }
-}
-
-/// Create a unique temporary database, run migrations, and return a pool.
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-/// Drop a temporary database.
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database for cleanup");
-
-    // Terminate any remaining connections to the temp database.
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
 }
 
 /// Create a temporary git repository with an initial commit.

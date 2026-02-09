@@ -31,6 +31,10 @@ pub struct PlanMeta {
     /// Isolation mode: "worktree" or "container".
     #[serde(default = "default_isolation")]
     pub isolation: String,
+    /// Docker image to use for container isolation (e.g. "gator-agent:latest").
+    /// Only used when `isolation = "container"`. Falls back to "ubuntu:24.04".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_image: Option<String>,
 }
 
 /// A single `[[tasks]]` entry in the plan TOML.
@@ -177,6 +181,7 @@ gate = "auto"
                 token_budget: None,
                 default_harness: "claude-code".to_owned(),
                 isolation: "worktree".to_owned(),
+                container_image: None,
             },
             tasks: vec![TaskToml {
                 name: "t1".to_owned(),
@@ -240,6 +245,47 @@ gate = "auto"
         let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
         assert_eq!(plan.plan.default_harness, "claude-code");
         assert_eq!(plan.plan.isolation, "worktree");
+    }
+
+    #[test]
+    fn deserialize_plan_with_container_image() {
+        let toml_str = r#"
+[plan]
+name = "Container plan"
+base_branch = "main"
+isolation = "container"
+container_image = "gator-agent:latest"
+
+[[tasks]]
+name = "task-one"
+description = "Do something"
+scope = "narrow"
+gate = "auto"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.isolation, "container");
+        assert_eq!(
+            plan.plan.container_image.as_deref(),
+            Some("gator-agent:latest")
+        );
+    }
+
+    #[test]
+    fn deserialize_plan_without_container_image() {
+        let toml_str = r#"
+[plan]
+name = "No image plan"
+base_branch = "main"
+isolation = "container"
+
+[[tasks]]
+name = "task-one"
+description = "Do something"
+scope = "narrow"
+gate = "auto"
+"#;
+        let plan: PlanToml = toml::from_str(toml_str).expect("should parse");
+        assert_eq!(plan.plan.container_image, None);
     }
 
     /// Helper to resolve a path relative to the workspace root.

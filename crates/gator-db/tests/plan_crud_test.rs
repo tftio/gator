@@ -1,86 +1,15 @@
 //! Integration tests for plan and task CRUD operations.
 //!
-//! These tests require a running PostgreSQL instance accessible via
-//! `GATOR_DATABASE_URL` (or the default `postgresql://localhost:5432/gator`).
-//!
-//! Each test creates a unique temporary database, runs migrations, and drops
-//! it on completion so tests are fully isolated.
+//! Each test creates a unique temporary database inside a shared containerized
+//! PostgreSQL instance (via testcontainers), runs migrations, and drops it on
+//! completion so tests are fully isolated.
 
-use std::time::Duration;
-
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
 use uuid::Uuid;
 
-use gator_db::config::DbConfig;
 use gator_db::models::{PlanStatus, TaskStatus};
-use gator_db::pool;
 use gator_db::queries::{plans, tasks};
 
-/// Helper: create a unique temporary database and return a pool pointing at it.
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database {db_name}: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(2)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
-
-    // Run migrations.
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-/// Helper: drop the temporary database.
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
-}
+use gator_test_utils::{create_test_db, drop_test_db};
 
 // -----------------------------------------------------------------------
 // Plan CRUD tests
@@ -88,7 +17,7 @@ async fn drop_temp_db(db_name: &str) {
 
 #[tokio::test]
 async fn insert_and_get_plan() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -98,6 +27,7 @@ async fn insert_and_get_plan() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .expect("insert_plan should succeed");
@@ -119,12 +49,12 @@ async fn insert_and_get_plan() {
     assert_eq!(fetched.name, "test-plan");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn get_plan_returns_none_for_missing_id() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let result = plans::get_plan(&pool, Uuid::new_v4())
         .await
@@ -133,12 +63,12 @@ async fn get_plan_returns_none_for_missing_id() {
     assert!(result.is_none());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn list_plans_returns_all() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     plans::insert_plan(
         &pool,
@@ -148,6 +78,7 @@ async fn list_plans_returns_all() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -159,6 +90,7 @@ async fn list_plans_returns_all() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -167,12 +99,12 @@ async fn list_plans_returns_all() {
     assert_eq!(all.len(), 2);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_plan_status_succeeds() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -182,6 +114,7 @@ async fn update_plan_status_succeeds() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -196,18 +129,18 @@ async fn update_plan_status_succeeds() {
     assert_eq!(updated.status, PlanStatus::Approved);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_plan_status_fails_for_missing_plan() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let result = plans::update_plan_status(&pool, Uuid::new_v4(), PlanStatus::Approved).await;
     assert!(result.is_err());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -216,7 +149,7 @@ async fn update_plan_status_fails_for_missing_plan() {
 
 #[tokio::test]
 async fn insert_and_get_task() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -226,6 +159,7 @@ async fn insert_and_get_task() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -260,12 +194,12 @@ async fn insert_and_get_task() {
     assert_eq!(fetched.name, "task-one");
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn list_tasks_for_plan_returns_correct_tasks() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan_a = plans::insert_plan(
         &pool,
@@ -275,6 +209,7 @@ async fn list_tasks_for_plan_returns_correct_tasks() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -286,6 +221,7 @@ async fn list_tasks_for_plan_returns_correct_tasks() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -327,14 +263,14 @@ async fn list_tasks_for_plan_returns_correct_tasks() {
     assert_eq!(plan_b_tasks.len(), 1);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_task_status_succeeds() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
-    let plan = plans::insert_plan(&pool, "p", "/tmp", "main", None, "claude-code", "worktree")
+    let plan = plans::insert_plan(&pool, "p", "/tmp", "main", None, "claude-code", "worktree", None)
         .await
         .unwrap();
     let task = tasks::insert_task(&pool, plan.id, "t", "d", "narrow", "auto", 3, None)
@@ -349,12 +285,12 @@ async fn update_task_status_succeeds() {
     assert_eq!(updated.status, TaskStatus::Assigned);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn task_dependencies_roundtrip() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -364,6 +300,7 @@ async fn task_dependencies_roundtrip() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -408,12 +345,12 @@ async fn task_dependencies_roundtrip() {
     assert!(a_deps.is_empty());
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn task_dependency_is_idempotent() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -423,6 +360,7 @@ async fn task_dependency_is_idempotent() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -445,12 +383,12 @@ async fn task_dependency_is_idempotent() {
     assert_eq!(deps.len(), 1);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn link_task_invariant_roundtrip() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -460,6 +398,7 @@ async fn link_task_invariant_roundtrip() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -509,7 +448,7 @@ async fn link_task_invariant_roundtrip() {
     assert_eq!(linked2.0, 1);
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 // -----------------------------------------------------------------------
@@ -518,7 +457,7 @@ async fn link_task_invariant_roundtrip() {
 
 #[tokio::test]
 async fn update_plan_status_to_completed_sets_completed_at() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -528,6 +467,7 @@ async fn update_plan_status_to_completed_sets_completed_at() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -546,12 +486,12 @@ async fn update_plan_status_to_completed_sets_completed_at() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_plan_status_to_failed_sets_completed_at() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -561,6 +501,7 @@ async fn update_plan_status_to_failed_sets_completed_at() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -577,12 +518,12 @@ async fn update_plan_status_to_failed_sets_completed_at() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_plan_status_to_approved_sets_approved_at() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -592,6 +533,7 @@ async fn update_plan_status_to_approved_sets_approved_at() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -610,12 +552,12 @@ async fn update_plan_status_to_approved_sets_approved_at() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_plan_status_does_not_overwrite_existing_timestamps() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     // Use approve_plan to set approved_at via the explicit path.
     let plan = plans::insert_plan(
@@ -626,6 +568,7 @@ async fn update_plan_status_does_not_overwrite_existing_timestamps() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -648,12 +591,12 @@ async fn update_plan_status_does_not_overwrite_existing_timestamps() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }
 
 #[tokio::test]
 async fn update_plan_status_to_running_does_not_set_timestamps() {
-    let (pool, db_name) = create_temp_db().await;
+    let (pool, db_name) = create_test_db().await;
 
     let plan = plans::insert_plan(
         &pool,
@@ -663,6 +606,7 @@ async fn update_plan_status_to_running_does_not_set_timestamps() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -683,5 +627,5 @@ async fn update_plan_status_to_running_does_not_set_timestamps() {
     );
 
     pool.close().await;
-    drop_temp_db(&db_name).await;
+    drop_test_db(&db_name).await;
 }

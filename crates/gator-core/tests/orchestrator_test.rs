@@ -9,15 +9,13 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
-use sqlx::postgres::PgPoolOptions;
-use sqlx::{Executor, PgPool};
+use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use gator_db::config::DbConfig;
 use gator_db::models::{InvariantKind, InvariantScope, PlanStatus, TaskStatus};
-use gator_db::pool;
 use gator_db::queries::invariants::{self, NewInvariant};
+use gator_test_utils::{create_test_db, drop_test_db};
 use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
@@ -42,7 +40,7 @@ struct TestHarness {
 
 impl TestHarness {
     async fn new() -> Self {
-        let (pool, db_name) = create_temp_db().await;
+        let (pool, db_name) = create_test_db().await;
         let (repo_dir, repo_path) = create_temp_git_repo();
         let worktree_base_dir =
             tempfile::TempDir::new().expect("failed to create worktree base dir");
@@ -75,71 +73,10 @@ impl TestHarness {
 
     async fn teardown(self) {
         self.pool.close().await;
-        drop_temp_db(&self.db_name).await;
+        drop_test_db(&self.db_name).await;
         drop(self.worktree_base_dir);
         drop(self.repo_dir);
     }
-}
-
-async fn create_temp_db() -> (PgPool, String) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect to maintenance database");
-
-    let db_name = format!("gator_test_{}", Uuid::new_v4().simple());
-    let stmt = format!("CREATE DATABASE {db_name}");
-    maint_pool
-        .execute(stmt.as_str())
-        .await
-        .unwrap_or_else(|e| panic!("failed to create temp database: {e}"));
-    maint_pool.close().await;
-
-    let temp_url = match base_config.database_url.rfind('/') {
-        Some(pos) => format!("{}/{db_name}", &base_config.database_url[..pos]),
-        None => panic!("cannot parse database URL"),
-    };
-
-    let temp_pool = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&temp_url)
-        .await
-        .unwrap_or_else(|e| panic!("failed to connect to temp db: {e}"));
-
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
-        .await
-        .expect("migrations should succeed");
-
-    (temp_pool, db_name)
-}
-
-async fn drop_temp_db(db_name: &str) {
-    let base_config = DbConfig::from_env();
-    let maint_url = base_config.maintenance_url();
-
-    let maint_pool = PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect(&maint_url)
-        .await
-        .expect("failed to connect for cleanup");
-
-    let terminate = format!(
-        "SELECT pg_terminate_backend(pid) \
-         FROM pg_stat_activity \
-         WHERE datname = '{db_name}' AND pid <> pg_backend_pid()"
-    );
-    let _ = maint_pool.execute(terminate.as_str()).await;
-    let stmt = format!("DROP DATABASE IF EXISTS {db_name}");
-    let _ = maint_pool.execute(stmt.as_str()).await;
-    maint_pool.close().await;
 }
 
 fn create_temp_git_repo() -> (tempfile::TempDir, PathBuf) {
@@ -267,6 +204,7 @@ async fn single_task_passes_completes_plan() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -319,6 +257,7 @@ async fn two_independent_tasks_both_pass() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -375,6 +314,7 @@ async fn sequential_dependency_runs_in_order() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -453,6 +393,7 @@ async fn fail_no_retry_escalates_to_failed() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -522,6 +463,7 @@ async fn restart_recovery_resets_orphaned_tasks() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -629,6 +571,7 @@ async fn fail_then_retry_then_pass() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
@@ -699,6 +642,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
         None,
         "claude-code",
         "worktree",
+        None,
     )
     .await
     .unwrap();
