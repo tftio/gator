@@ -52,7 +52,7 @@ pub struct LifecycleConfig {
 /// Run the full lifecycle for a single agent task.
 ///
 /// Steps:
-/// 1. Create worktree
+/// 1. Create workspace (worktree on host; container w/ copy-in for sandboxed mode)
 /// 2. Generate scoped token
 /// 3. Materialize task (includes retry feedback if attempt > 0)
 /// 4. Build MaterializedTask with env vars
@@ -60,8 +60,9 @@ pub struct LifecycleConfig {
 /// 6. Spawn agent
 /// 7. Start task (assigned -> running)
 /// 8. Collect events with timeout
-/// 9. Run gate
-/// 10. Evaluate verdict -> return LifecycleResult
+/// 9. Extract results from container to host worktree (no-op for worktree mode)
+/// 10. Run gate on host worktree
+/// 11. Evaluate verdict -> return LifecycleResult
 pub async fn run_agent_lifecycle(
     pool: &PgPool,
     task: &Task,
@@ -87,7 +88,13 @@ pub async fn run_agent_lifecycle(
         .await
         .with_context(|| format!("failed to create workspace for task {}", task.name))?;
 
-    let worktree_path = workspace.path.clone();
+    // The path the agent sees (container: /workspace, worktree: host path).
+    let agent_working_dir = workspace.path.clone();
+    // The host-side path used for gate checks and commits.
+    let host_worktree_path = workspace
+        .host_path
+        .clone()
+        .unwrap_or_else(|| workspace.path.clone());
 
     // 2. Generate scoped token.
     let agent_token = token::generate_token(token_config, task_id, attempt);
@@ -121,9 +128,10 @@ pub async fn run_agent_lifecycle(
         "GATOR_TOKEN_SECRET".to_string(),
         hex::encode(&token_config.secret),
     );
-    // If running in a container, expose the container ID.
+    // If running in a container, expose the container ID and sandbox flag.
     if let Some(ref cid) = workspace.container_id {
         env_vars.insert("GATOR_CONTAINER_ID".to_string(), cid.clone());
+        env_vars.insert("GATOR_SANDBOXED".to_string(), "true".to_string());
     }
 
     let materialized = MaterializedTask {
@@ -131,12 +139,13 @@ pub async fn run_agent_lifecycle(
         name: task.name.clone(),
         description: task_description,
         invariant_commands,
-        working_dir: worktree_path.clone(),
+        working_dir: agent_working_dir,
         env_vars,
     };
 
     // 5. Assign task (pending -> assigned).
-    dispatch::assign_task(pool, task_id, harness.name(), &worktree_path)
+    // Store the host-side path so the gate runner can find the worktree.
+    dispatch::assign_task(pool, task_id, harness.name(), &host_worktree_path)
         .await
         .with_context(|| format!("failed to assign task {}", task.name))?;
 
@@ -191,14 +200,20 @@ pub async fn run_agent_lifecycle(
         }
     }
 
-    // 9. Run gate.
+    // 9. Extract results from container (no-op for worktree isolation).
+    isolation
+        .extract_results(&workspace)
+        .await
+        .with_context(|| format!("failed to extract results for task {}", task.name))?;
+
+    // 10. Run gate on host worktree.
     let gate_runner = GateRunner::new(pool);
     let verdict = gate_runner
         .run_gate(task_id)
         .await
         .with_context(|| format!("gate check failed for task {}", task.name))?;
 
-    // 10. Evaluate verdict.
+    // 11. Evaluate verdict.
     let action = evaluate_verdict(pool, task_id, &verdict)
         .await
         .with_context(|| format!("failed to evaluate verdict for task {}", task.name))?;
@@ -206,7 +221,7 @@ pub async fn run_agent_lifecycle(
     let result = match action {
         GateAction::AutoPassed => {
             // Commit all agent work to the worktree branch so `gator merge` can find it.
-            match commit_agent_work(&worktree_path, &task.name, attempt) {
+            match commit_agent_work(&host_worktree_path, &task.name, attempt) {
                 Ok(true) => {
                     tracing::info!(task_id = %task_id, "committed agent work to branch");
                 }

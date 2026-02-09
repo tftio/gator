@@ -1,7 +1,9 @@
-//! Docker container isolation backend.
+//! Docker container isolation backend (sandboxed).
 //!
-//! Creates Docker containers with the repository mounted as a volume.
-//! Each task gets its own container for filesystem isolation.
+//! Creates Docker containers **without** bind-mounting the host repository.
+//! The host worktree contents are copied into the container via `docker cp`,
+//! and after the agent finishes, results are extracted back out via `docker cp`.
+//! This ensures the agent cannot write to the host filesystem directly.
 
 use std::path::PathBuf;
 
@@ -10,28 +12,35 @@ use async_trait::async_trait;
 use tokio::process::Command;
 
 use super::{Isolation, WorkspaceInfo};
+use crate::worktree::WorktreeManager;
 
 /// Configuration for the container isolation backend.
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
-    /// Docker image to use (e.g. "ubuntu:24.04").
+    /// Docker image to use (e.g. "gator-agent:latest").
     pub image: String,
-    /// Path to the host repository to mount.
-    pub repo_path: PathBuf,
     /// Additional flags to pass to `docker create`.
     pub extra_flags: Vec<String>,
 }
 
-/// Isolation backend that runs tasks inside Docker containers.
+/// Isolation backend that runs tasks inside sandboxed Docker containers.
+///
+/// The agent writes to a container-local `/workspace` directory. No host
+/// paths are bind-mounted read-write. Results are extracted via `docker cp`
+/// after the agent completes.
 #[derive(Debug)]
 pub struct ContainerIsolation {
     config: ContainerConfig,
+    worktree_manager: WorktreeManager,
 }
 
 impl ContainerIsolation {
     /// Create a new container isolation backend.
-    pub fn new(config: ContainerConfig) -> Self {
-        Self { config }
+    pub fn new(config: ContainerConfig, worktree_manager: WorktreeManager) -> Self {
+        Self {
+            config,
+            worktree_manager,
+        }
     }
 
     /// Build the container name for a plan/task pair.
@@ -53,38 +62,85 @@ impl ContainerIsolation {
 
     /// Build the branch name for a plan/task pair (same convention as worktree).
     fn branch_name(plan_name: &str, task_name: &str) -> String {
-        crate::worktree::WorktreeManager::branch_name(plan_name, task_name)
+        WorktreeManager::branch_name(plan_name, task_name)
     }
 
-    /// Create a git branch in the host repo for this task.
-    async fn create_branch(&self, branch_name: &str) -> Result<()> {
-        // Check if branch already exists.
-        let check = Command::new("git")
-            .args(["rev-parse", "--verify"])
-            .arg(format!("refs/heads/{branch_name}"))
-            .current_dir(&self.config.repo_path)
+    /// Copy files from host path into the container, excluding `.git`.
+    ///
+    /// Uses a tar pipe to exclude `.git` during the copy:
+    ///   tar -C <host_path> --exclude='.git' -cf - . | docker cp - <cid>:/workspace
+    async fn copy_into_container(
+        container_id: &str,
+        host_path: &std::path::Path,
+    ) -> Result<()> {
+        // First create the /workspace directory inside the container.
+        let mkdir_output = Command::new("docker")
+            .args(["exec", container_id, "mkdir", "-p", "/workspace"])
             .output()
             .await
-            .context("failed to check branch existence")?;
+            .context("failed to run docker exec mkdir")?;
 
-        if check.status.success() {
-            return Ok(()); // Branch already exists.
+        if !mkdir_output.status.success() {
+            let stderr = String::from_utf8_lossy(&mkdir_output.stderr);
+            bail!("docker exec mkdir -p /workspace failed: {stderr}");
         }
 
-        let output = Command::new("git")
-            .args(["branch", branch_name])
-            .current_dir(&self.config.repo_path)
+        // Use tar pipe to copy contents excluding .git:
+        //   tar -C <host_path> --exclude='.git' -cf - . | docker cp - <cid>:/workspace
+        let tar_cmd = format!(
+            "tar -C {} --exclude='.git' -cf - . | docker cp - {}:/workspace",
+            shell_escape(host_path),
+            container_id,
+        );
+
+        let output = Command::new("sh")
+            .args(["-c", &tar_cmd])
             .output()
             .await
-            .context("failed to create branch")?;
+            .context("failed to copy files into container")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("git branch {branch_name} failed: {stderr}");
+            bail!("copy into container failed: {stderr}");
         }
 
         Ok(())
     }
+
+    /// Copy files from the container back to a host directory, excluding `.git`.
+    ///
+    /// Uses a tar pipe:
+    ///   docker cp <cid>:/workspace/. - | tar -C <dest> --exclude='.git' -xf -
+    async fn copy_from_container(
+        container_id: &str,
+        dest_path: &std::path::Path,
+    ) -> Result<()> {
+        let tar_cmd = format!(
+            "docker cp {}:/workspace/. - | tar -C {} --exclude='.git' -xf -",
+            container_id,
+            shell_escape(dest_path),
+        );
+
+        let output = Command::new("sh")
+            .args(["-c", &tar_cmd])
+            .output()
+            .await
+            .context("failed to copy files from container")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("copy from container failed: {stderr}");
+        }
+
+        Ok(())
+    }
+}
+
+/// Escape a path for use in a shell command.
+fn shell_escape(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    // Wrap in single quotes, escaping any embedded single quotes.
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 #[async_trait]
@@ -97,19 +153,22 @@ impl Isolation for ContainerIsolation {
         let container_name = Self::container_name(plan_name, task_name);
         let branch_name = Self::branch_name(plan_name, task_name);
 
-        // Create a branch in the host repo.
-        self.create_branch(&branch_name).await?;
+        // 1. Create a host worktree via WorktreeManager.
+        let wt_info = self
+            .worktree_manager
+            .create_worktree(&branch_name)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .with_context(|| {
+                format!("failed to create worktree for {plan_name}/{task_name}")
+            })?;
 
-        // Build docker create command.
-        let repo_path_str = self.config.repo_path.to_string_lossy();
-        let volume_mount = format!("{repo_path_str}:/workspace");
+        let host_worktree_path = wt_info.path.clone();
 
+        // 2. docker create WITHOUT volume mount.
         let mut args = vec![
             "create".to_string(),
             "--name".to_string(),
             container_name.clone(),
-            "-v".to_string(),
-            volume_mount,
             "-w".to_string(),
             "/workspace".to_string(),
         ];
@@ -135,7 +194,7 @@ impl Isolation for ContainerIsolation {
 
         let container_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-        // Start the container.
+        // 3. docker start.
         let start_output = Command::new("docker")
             .args(["start", &container_id])
             .output()
@@ -152,14 +211,45 @@ impl Isolation for ContainerIsolation {
             bail!("docker start failed: {stderr}");
         }
 
+        // 4. Copy worktree contents into the container (excluding .git).
+        if let Err(e) = Self::copy_into_container(&container_id, &host_worktree_path).await {
+            // Clean up container on failure.
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &container_id])
+                .output()
+                .await;
+            return Err(e.context("failed to copy worktree into container"));
+        }
+
         Ok(WorkspaceInfo {
             path: PathBuf::from("/workspace"),
-            branch: Some(branch_name),
+            host_path: Some(host_worktree_path),
+            branch: wt_info.branch,
             container_id: Some(container_id),
         })
     }
 
+    async fn extract_results(&self, info: &WorkspaceInfo) -> Result<()> {
+        let container_id = info
+            .container_id
+            .as_deref()
+            .context("extract_results called without container_id")?;
+        let host_path = info
+            .host_path
+            .as_deref()
+            .context("extract_results called without host_path")?;
+
+        tracing::info!(
+            container_id = container_id,
+            host_path = %host_path.display(),
+            "extracting results from container to host worktree"
+        );
+
+        Self::copy_from_container(container_id, host_path).await
+    }
+
     async fn remove_workspace(&self, info: &WorkspaceInfo) -> Result<()> {
+        // Remove the Docker container.
         if let Some(ref container_id) = info.container_id {
             let output = Command::new("docker")
                 .args(["rm", "-f", container_id])
@@ -174,6 +264,16 @@ impl Isolation for ContainerIsolation {
                     bail!("docker rm -f {container_id} failed: {stderr}");
                 }
             }
+        }
+
+        // Remove the host worktree.
+        if let Some(ref host_path) = info.host_path {
+            self.worktree_manager
+                .remove_worktree(host_path)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .with_context(|| {
+                    format!("failed to remove worktree at {}", host_path.display())
+                })?;
         }
 
         Ok(())
@@ -206,12 +306,45 @@ mod tests {
 
     #[test]
     fn container_isolation_name() {
+        use std::process::Command;
+        use tempfile::TempDir;
+
+        // Create a temporary git repo so WorktreeManager::new succeeds.
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let repo_path = dir.path().to_path_buf();
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .args(args)
+                .current_dir(&repo_path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        };
+        run(&["init"]);
+        run(&["config", "user.email", "test@gator.dev"]);
+        run(&["config", "user.name", "Gator Test"]);
+        std::fs::write(repo_path.join("README.md"), "# Test\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-m", "Initial commit"]);
+
+        let mgr = WorktreeManager::new(&repo_path, None).unwrap();
         let config = ContainerConfig {
             image: "ubuntu:24.04".to_string(),
-            repo_path: PathBuf::from("/tmp/repo"),
             extra_flags: vec![],
         };
-        let iso = ContainerIsolation::new(config);
+        let iso = ContainerIsolation::new(config, mgr);
         assert_eq!(iso.name(), "container");
+    }
+
+    #[test]
+    fn shell_escape_simple_path() {
+        let path = std::path::Path::new("/tmp/my-worktree");
+        assert_eq!(shell_escape(path), "'/tmp/my-worktree'");
+    }
+
+    #[test]
+    fn shell_escape_path_with_single_quote() {
+        let path = std::path::Path::new("/tmp/it's-a-test");
+        assert_eq!(shell_escape(path), "'/tmp/it'\\''s-a-test'");
     }
 }

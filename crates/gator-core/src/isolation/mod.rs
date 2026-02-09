@@ -15,8 +15,17 @@ use async_trait::async_trait;
 /// Information about a created workspace.
 #[derive(Debug, Clone)]
 pub struct WorkspaceInfo {
-    /// Filesystem path to the workspace (worktree dir or mounted volume path).
+    /// Filesystem path to the workspace the agent sees.
+    ///
+    /// For worktree isolation this is the host worktree path. For container
+    /// isolation this is `/workspace` inside the container.
     pub path: PathBuf,
+    /// Host-side worktree path (set only for container isolation).
+    ///
+    /// When running in a sandboxed container the agent writes to a
+    /// container-local filesystem. After the agent finishes, results are
+    /// extracted back to this host path for gate checks and commits.
+    pub host_path: Option<PathBuf>,
     /// Git branch name, if applicable.
     pub branch: Option<String>,
     /// Docker container ID, if applicable.
@@ -32,12 +41,26 @@ pub trait Isolation: Send + Sync {
     /// Create an isolated workspace for a task.
     async fn create_workspace(&self, plan_name: &str, task_name: &str) -> Result<WorkspaceInfo>;
 
+    /// Extract results from the workspace back to the host filesystem.
+    ///
+    /// For worktree isolation this is a no-op (the agent already wrote to the
+    /// host worktree). For container isolation this copies files from the
+    /// container's `/workspace` back to the host worktree, excluding `.git`.
+    async fn extract_results(&self, info: &WorkspaceInfo) -> Result<()>;
+
     /// Remove a previously created workspace.
     async fn remove_workspace(&self, info: &WorkspaceInfo) -> Result<()>;
 }
 
 /// Factory function: create an isolation backend from a mode string.
-pub fn create_isolation(mode: &str, repo_path: &Path) -> Result<Arc<dyn Isolation>> {
+///
+/// `container_image` is only used when `mode` is `"container"`. It defaults
+/// to `"ubuntu:24.04"` when `None`.
+pub fn create_isolation(
+    mode: &str,
+    repo_path: &Path,
+    container_image: Option<&str>,
+) -> Result<Arc<dyn Isolation>> {
     match mode {
         "worktree" => {
             let mgr = crate::worktree::WorktreeManager::new(repo_path, None)
@@ -45,12 +68,16 @@ pub fn create_isolation(mode: &str, repo_path: &Path) -> Result<Arc<dyn Isolatio
             Ok(Arc::new(worktree::WorktreeIsolation::new(mgr)))
         }
         "container" => {
+            let image = container_image
+                .unwrap_or("ubuntu:24.04")
+                .to_string();
+            let mgr = crate::worktree::WorktreeManager::new(repo_path, None)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             let config = container::ContainerConfig {
-                image: "ubuntu:24.04".to_string(),
-                repo_path: repo_path.to_path_buf(),
+                image,
                 extra_flags: vec![],
             };
-            Ok(Arc::new(container::ContainerIsolation::new(config)))
+            Ok(Arc::new(container::ContainerIsolation::new(config, mgr)))
         }
         other => {
             bail!("unknown isolation mode: {other:?} (expected \"worktree\" or \"container\")")

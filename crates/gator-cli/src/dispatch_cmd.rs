@@ -42,8 +42,11 @@ pub async fn run_dispatch(
     let registry = Arc::new(registry);
 
     // Set up isolation backend based on plan configuration.
-    let isolation =
-        isolation::create_isolation(&plan.isolation, std::path::Path::new(&plan.project_path))?;
+    let isolation = isolation::create_isolation(
+        &plan.isolation,
+        std::path::Path::new(&plan.project_path),
+        plan.container_image.as_deref(),
+    )?;
 
     // Build config.
     let config = OrchestratorConfig {

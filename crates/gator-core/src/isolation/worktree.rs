@@ -41,9 +41,15 @@ impl Isolation for WorktreeIsolation {
 
         Ok(WorkspaceInfo {
             path: wt_info.path,
+            host_path: None,
             branch: wt_info.branch,
             container_id: None,
         })
+    }
+
+    async fn extract_results(&self, _info: &WorkspaceInfo) -> Result<()> {
+        // No-op: worktree isolation writes directly to the host filesystem.
+        Ok(())
     }
 
     async fn remove_workspace(&self, info: &WorkspaceInfo) -> Result<()> {
@@ -100,6 +106,7 @@ mod tests {
 
         assert!(info.path.exists());
         assert_eq!(info.branch.as_deref(), Some("gator/test-plan/test-task"));
+        assert!(info.host_path.is_none());
         assert!(info.container_id.is_none());
 
         isolation
