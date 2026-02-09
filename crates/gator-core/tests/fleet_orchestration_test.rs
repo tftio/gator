@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
+use tokio_util::sync::CancellationToken;
 use async_trait::async_trait;
 use futures::Stream;
 use sqlx::postgres::PgPoolOptions;
@@ -415,6 +416,7 @@ async fn diamond_dag_topological_order() {
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -443,6 +445,7 @@ async fn diamond_dag_topological_order() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -508,6 +511,7 @@ async fn retry_with_escalation() {
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -556,6 +560,7 @@ async fn retry_with_escalation() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -597,6 +602,7 @@ async fn timeout_kills_agent() {
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -647,6 +653,7 @@ async fn timeout_kills_agent() {
             max_agents: 4,
             task_timeout: Duration::from_millis(200), // short timeout
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -685,6 +692,7 @@ async fn restart_recovery() {
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -761,6 +769,7 @@ async fn restart_recovery() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -792,6 +801,7 @@ async fn status_and_log_after_run() {
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -840,6 +850,7 @@ async fn status_and_log_after_run() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();

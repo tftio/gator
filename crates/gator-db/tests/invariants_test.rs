@@ -95,6 +95,7 @@ fn test_new_invariant(name: &str) -> NewInvariant<'_> {
         expected_exit_code: 0,
         threshold: None,
         scope: InvariantScope::Project,
+        timeout_secs: 300,
     }
 }
 
@@ -402,6 +403,7 @@ async fn insert_invariant_with_all_fields() {
         expected_exit_code: 0,
         threshold: Some(80.0),
         scope: InvariantScope::Global,
+        timeout_secs: 300,
     };
 
     let inserted = invariants::insert_invariant(&pool, &new)

@@ -109,6 +109,7 @@ async fn insert_test_invariant(pool: &PgPool, name: &str) -> gator_db::models::I
         expected_exit_code: 0,
         threshold: None,
         scope: gator_db::models::InvariantScope::Project,
+        timeout_secs: 300,
     };
     invariants::insert_invariant(pool, &new)
         .await

@@ -202,6 +202,9 @@ pub enum InvariantCommands {
         /// Scope: global or project (default: project)
         #[arg(long, default_value = "project")]
         scope: String,
+        /// Timeout in seconds (default: 300)
+        #[arg(long, default_value_t = 300)]
+        timeout: i32,
     },
     /// List all invariants
     List {

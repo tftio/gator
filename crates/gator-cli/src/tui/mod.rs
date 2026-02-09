@@ -19,6 +19,14 @@ use app::App;
 
 /// Launch the interactive TUI dashboard.
 pub async fn run_dashboard(pool: PgPool) -> Result<()> {
+    // Install panic hook to restore terminal on crash.
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        original_hook(panic_info);
+    }));
+
     // Set up terminal.
     enable_raw_mode()?;
     let mut stdout = io::stdout();

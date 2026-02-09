@@ -1,10 +1,12 @@
 //! `gator dispatch` command: run a plan to completion using the orchestrator.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use sqlx::PgPool;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use gator_core::harness::{ClaudeCodeAdapter, HarnessRegistry};
@@ -51,6 +53,25 @@ pub async fn run_dispatch(
         task_timeout: Duration::from_secs(timeout_secs),
     };
 
+    // Set up graceful shutdown: first signal cancels, second force-exits.
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    let got_first_signal = Arc::new(AtomicBool::new(false));
+    let got_first_clone = Arc::clone(&got_first_signal);
+
+    tokio::spawn(async move {
+        loop {
+            tokio::signal::ctrl_c().await.ok();
+            if got_first_clone.swap(true, Ordering::SeqCst) {
+                // Second signal: force exit.
+                eprintln!("\nForce exit.");
+                std::process::exit(130);
+            }
+            eprintln!("\nShutting down gracefully (Ctrl+C again to force)...");
+            cancel_clone.cancel();
+        }
+    });
+
     // Run orchestrator.
     let result = run_orchestrator(
         pool,
@@ -59,6 +80,7 @@ pub async fn run_dispatch(
         &isolation,
         token_config,
         &config,
+        cancel,
     )
     .await?;
 
@@ -91,6 +113,11 @@ pub async fn run_dispatch(
         OrchestratorResult::BudgetExceeded { used, budget } => {
             println!("\nPlan stopped: token budget exceeded ({used}/{budget} tokens used).");
             std::process::exit(3);
+        }
+        OrchestratorResult::Interrupted => {
+            println!("\nPlan interrupted by signal. In-flight tasks drained.");
+            println!("Re-run `gator dispatch {plan_id}` to resume.");
+            std::process::exit(130);
         }
     }
 

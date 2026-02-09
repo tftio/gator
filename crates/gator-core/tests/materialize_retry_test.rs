@@ -123,6 +123,7 @@ async fn create_test_fixtures(pool: &PgPool) -> (Uuid, Uuid) {
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await

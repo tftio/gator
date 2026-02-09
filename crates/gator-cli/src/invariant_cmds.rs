@@ -33,6 +33,7 @@ pub async fn run_invariant_command(
             expected_exit_code,
             threshold,
             scope,
+            timeout,
         } => {
             cmd_add(pool, AddParams {
                 name,
@@ -43,6 +44,7 @@ pub async fn run_invariant_command(
                 expected_exit_code,
                 threshold,
                 scope,
+                timeout,
             })
             .await
         }
@@ -65,6 +67,7 @@ struct AddParams {
     expected_exit_code: i32,
     threshold: Option<f32>,
     scope: String,
+    timeout: i32,
 }
 
 /// Create a new invariant definition and insert it into the database.
@@ -101,6 +104,7 @@ async fn cmd_add(pool: &PgPool, params: AddParams) -> Result<()> {
         expected_exit_code: params.expected_exit_code,
         threshold: params.threshold,
         scope,
+        timeout_secs: params.timeout,
     };
 
     let invariant = invariants::insert_invariant(pool, &new)
@@ -406,6 +410,8 @@ mod tests {
             "80.0",
             "--scope",
             "global",
+            "--timeout",
+            "60",
         ])
         .expect("should parse successfully");
 
@@ -421,6 +427,7 @@ mod tests {
                         expected_exit_code,
                         threshold,
                         scope,
+                        timeout,
                     },
             } => {
                 assert_eq!(name, "rust_build");
@@ -431,6 +438,7 @@ mod tests {
                 assert_eq!(expected_exit_code, 0);
                 assert_eq!(threshold, Some(80.0));
                 assert_eq!(scope, "global");
+                assert_eq!(timeout, 60);
             }
             _ => panic!("expected Invariant Add command"),
         }
@@ -462,6 +470,7 @@ mod tests {
                         expected_exit_code,
                         threshold,
                         scope,
+                        timeout,
                     },
             } => {
                 assert_eq!(name, "my_check");
@@ -472,6 +481,7 @@ mod tests {
                 assert_eq!(expected_exit_code, 0); // default
                 assert!(threshold.is_none());
                 assert_eq!(scope, "project"); // default
+                assert_eq!(timeout, 300); // default
             }
             _ => panic!("expected Invariant Add command"),
         }

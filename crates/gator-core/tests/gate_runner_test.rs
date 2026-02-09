@@ -145,6 +145,7 @@ async fn create_test_invariant(
         expected_exit_code,
         threshold: None,
         scope: gator_db::models::InvariantScope::Project,
+        timeout_secs: 300,
     };
     invariants::insert_invariant(pool, &new)
         .await

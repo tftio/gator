@@ -309,6 +309,7 @@ async fn setup_passing_task(pool: &PgPool, repo_path: &Path) -> (Uuid, gator_db:
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -368,6 +369,7 @@ async fn setup_failing_task(
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await

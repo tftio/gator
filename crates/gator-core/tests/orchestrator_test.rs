@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use tokio_util::sync::CancellationToken;
 use async_trait::async_trait;
 use futures::Stream;
 use sqlx::postgres::PgPoolOptions;
@@ -235,6 +236,7 @@ async fn create_invariant(pool: &PgPool, name: &str, command: &str) -> gator_db:
             expected_exit_code: 0,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
         },
     )
     .await
@@ -292,6 +294,7 @@ async fn single_task_passes_completes_plan() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -354,6 +357,7 @@ async fn two_independent_tasks_both_pass() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -416,6 +420,7 @@ async fn sequential_dependency_runs_in_order() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -476,6 +481,7 @@ async fn fail_no_retry_escalates_to_failed() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -573,6 +579,7 @@ async fn restart_recovery_resets_orphaned_tasks() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -643,6 +650,7 @@ async fn fail_then_retry_then_pass() {
             max_agents: 4,
             task_timeout: Duration::from_secs(30),
         },
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -711,6 +719,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
         &isolation,
         &test_token_config(),
         &config,
+        CancellationToken::new(),
     )
     .await
     .unwrap();
@@ -741,6 +750,7 @@ async fn human_review_pauses_then_resumes_on_approve() {
         &isolation,
         &test_token_config(),
         &config,
+        CancellationToken::new(),
     )
     .await
     .unwrap();

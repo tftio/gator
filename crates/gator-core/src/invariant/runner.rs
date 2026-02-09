@@ -1,7 +1,8 @@
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use gator_db::models::Invariant;
@@ -30,12 +31,14 @@ pub struct InvariantResult {
 /// [`Invariant::expected_exit_code`] to determine pass/fail.
 pub async fn run_invariant(invariant: &Invariant, working_dir: &Path) -> Result<InvariantResult> {
     let start = Instant::now();
+    let timeout = Duration::from_secs(invariant.timeout_secs.max(1) as u64);
 
-    let output = Command::new(&invariant.command)
+    let mut child = Command::new(&invariant.command)
         .args(&invariant.args)
         .current_dir(working_dir)
-        .output()
-        .await
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .with_context(|| {
             format!(
                 "failed to execute invariant {:?} (command: {} {})",
@@ -45,21 +48,75 @@ pub async fn run_invariant(invariant: &Invariant, working_dir: &Path) -> Result<
             )
         })?;
 
-    let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
+    // Take stdout/stderr handles so we can read them concurrently with
+    // waiting for the process. This avoids deadlocks if the child fills the
+    // pipe buffer.
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
 
-    let exit_code = output.status.code();
-    let passed = exit_code == Some(invariant.expected_exit_code);
+    let read_stdout = async {
+        let mut buf = Vec::new();
+        if let Some(ref mut pipe) = stdout_pipe {
+            pipe.read_to_end(&mut buf).await.ok();
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let read_stderr = async {
+        let mut buf = Vec::new();
+        if let Some(ref mut pipe) = stderr_pipe {
+            pipe.read_to_end(&mut buf).await.ok();
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    };
 
-    Ok(InvariantResult {
-        passed,
-        exit_code,
-        stdout,
-        stderr,
-        duration_ms,
+    // Wait for exit + read output concurrently, with a timeout.
+    match tokio::time::timeout(timeout, async {
+        let (wait_result, stdout, stderr) =
+            tokio::join!(child.wait(), read_stdout, read_stderr);
+        (wait_result, stdout, stderr)
     })
+    .await
+    {
+        Ok((Ok(status), stdout, stderr)) => {
+            let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
+            let exit_code = status.code();
+            let passed = exit_code == Some(invariant.expected_exit_code);
+
+            Ok(InvariantResult {
+                passed,
+                exit_code,
+                stdout,
+                stderr,
+                duration_ms,
+            })
+        }
+        Ok((Err(e), _, _)) => Err(e).with_context(|| {
+            format!(
+                "failed to wait on invariant {:?} (command: {} {})",
+                invariant.name,
+                invariant.command,
+                invariant.args.join(" "),
+            )
+        }),
+        Err(_) => {
+            // Timeout: kill the child process.
+            let _ = child.kill().await;
+            let duration_ms = i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
+
+            Ok(InvariantResult {
+                passed: false,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: format!(
+                    "invariant {:?} timed out after {}s",
+                    invariant.name,
+                    invariant.timeout_secs
+                ),
+                duration_ms,
+            })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -81,6 +138,7 @@ mod tests {
             expected_exit_code,
             threshold: None,
             scope: InvariantScope::Project,
+            timeout_secs: 300,
             created_at: Utc::now(),
         }
     }
@@ -158,6 +216,23 @@ mod tests {
         assert!(
             result.is_err(),
             "running a nonexistent command should return an error"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_slow_invariant() {
+        let mut inv = test_invariant("sleep", &["60"], 0);
+        inv.timeout_secs = 1;
+        let result = run_invariant(&inv, Path::new("/tmp"))
+            .await
+            .expect("should succeed even on timeout");
+
+        assert!(!result.passed, "timed-out invariant should fail");
+        assert!(result.exit_code.is_none(), "killed process has no exit code");
+        assert!(
+            result.stderr.contains("timed out"),
+            "stderr should mention timeout, got: {:?}",
+            result.stderr
         );
     }
 

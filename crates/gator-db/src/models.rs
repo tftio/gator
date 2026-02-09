@@ -376,6 +376,7 @@ pub struct Invariant {
     pub expected_exit_code: i32,
     pub threshold: Option<f32>,
     pub scope: InvariantScope,
+    pub timeout_secs: i32,
     pub created_at: DateTime<Utc>,
 }
 

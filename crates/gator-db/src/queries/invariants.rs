@@ -17,6 +17,7 @@ pub struct NewInvariant<'a> {
     pub expected_exit_code: i32,
     pub threshold: Option<f32>,
     pub scope: InvariantScope,
+    pub timeout_secs: i32,
 }
 
 /// Insert a new invariant. Returns the inserted row with server-generated
@@ -27,8 +28,8 @@ pub struct NewInvariant<'a> {
 pub async fn insert_invariant(pool: &PgPool, new: &NewInvariant<'_>) -> Result<Invariant> {
     let invariant = sqlx::query_as::<_, Invariant>(
         "INSERT INTO invariants (name, description, kind, command, args, \
-         expected_exit_code, threshold, scope) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         expected_exit_code, threshold, scope, timeout_secs) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          RETURNING *",
     )
     .bind(new.name)
@@ -39,6 +40,7 @@ pub async fn insert_invariant(pool: &PgPool, new: &NewInvariant<'_>) -> Result<I
     .bind(new.expected_exit_code)
     .bind(new.threshold)
     .bind(new.scope)
+    .bind(new.timeout_secs)
     .fetch_one(pool)
     .await
     .with_context(|| format!("failed to insert invariant {:?}", new.name))?;

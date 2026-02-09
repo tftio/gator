@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use sqlx::PgPool;
 use tokio::sync::{mpsc, Semaphore};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use gator_db::models::{PlanStatus, TaskStatus};
@@ -40,6 +41,8 @@ pub enum OrchestratorResult {
     HumanRequired { tasks_awaiting_review: Vec<String> },
     /// Token budget exceeded.
     BudgetExceeded { used: i64, budget: i64 },
+    /// Orchestrator was interrupted by a cancellation signal.
+    Interrupted,
 }
 
 /// Message sent from spawned lifecycle tasks back to the orchestrator loop.
@@ -98,6 +101,7 @@ pub async fn run_orchestrator(
     isolation: &Arc<dyn Isolation>,
     token_config: &TokenConfig,
     config: &OrchestratorConfig,
+    cancel: CancellationToken,
 ) -> Result<OrchestratorResult> {
     // Look up the plan.
     let plan = plan_db::get_plan(pool, plan_id)
@@ -153,6 +157,31 @@ pub async fn run_orchestrator(
     let mut in_flight: usize = 0;
 
     loop {
+        // 3-pre. Check cancellation.
+        if cancel.is_cancelled() {
+            tracing::info!(plan_id = %plan_id, "orchestrator cancelled, draining in-flight tasks");
+            let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            while in_flight > 0 {
+                match tokio::time::timeout_at(drain_deadline, rx.recv()).await {
+                    Ok(Some(done)) => {
+                        in_flight -= 1;
+                        let _ = handle_lifecycle_result(pool, &done).await;
+                    }
+                    _ => break,
+                }
+            }
+            if in_flight > 0 {
+                tracing::warn!(
+                    plan_id = %plan_id,
+                    remaining = in_flight,
+                    "drain timeout expired, {} tasks still in flight",
+                    in_flight
+                );
+            }
+            plan_db::update_plan_status(pool, plan_id, PlanStatus::Failed).await?;
+            return Ok(OrchestratorResult::Interrupted);
+        }
+
         // 3a. Drain completed results (non-blocking).
         while let Ok(done) = rx.try_recv() {
             in_flight -= 1;
@@ -282,9 +311,25 @@ pub async fn run_orchestrator(
             in_flight += 1;
 
             tokio::spawn(async move {
-                let harness = registry_clone
-                    .get(&harness_name)
-                    .expect("harness should be registered");
+                let Some(harness) = registry_clone.get(&harness_name) else {
+                    tracing::error!(
+                        task_id = %task_id,
+                        harness = %harness_name,
+                        "harness disappeared from registry after validation"
+                    );
+                    drop(permit);
+                    let _ = tx_clone
+                        .send(LifecycleDone {
+                            task_id,
+                            task_name,
+                            result: Err(anyhow::anyhow!(
+                                "harness '{}' not found in registry",
+                                harness_name
+                            )),
+                        })
+                        .await;
+                    return;
+                };
 
                 let result = run_agent_lifecycle(
                     &pool_clone,
@@ -311,16 +356,30 @@ pub async fn run_orchestrator(
             });
         }
 
-        // 3e. If tasks are in flight but nothing is ready, wait for a result.
+        // 3e. If tasks are in flight but nothing is ready, wait for a result
+        // or cancellation.
         if in_flight > 0 {
-            if let Some(done) = rx.recv().await {
-                in_flight -= 1;
-                handle_lifecycle_result(pool, &done).await?;
+            tokio::select! {
+                done = rx.recv() => {
+                    if let Some(done) = done {
+                        in_flight -= 1;
+                        handle_lifecycle_result(pool, &done).await?;
+                    }
+                }
+                _ = cancel.cancelled() => {
+                    // Will be handled at top of next loop iteration.
+                    continue;
+                }
             }
         } else if !spawned_any {
             // Nothing in flight, nothing spawned this iteration.
             // Brief sleep to avoid busy-loop before re-checking.
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+                _ = cancel.cancelled() => {
+                    continue;
+                }
+            }
         }
     }
 }

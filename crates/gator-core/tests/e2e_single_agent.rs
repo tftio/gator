@@ -220,6 +220,7 @@ async fn insert_invariant(
         expected_exit_code,
         threshold: None,
         scope: InvariantScope::Project,
+        timeout_secs: 300,
     };
     invariants::insert_invariant(pool, &new)
         .await
