@@ -15,7 +15,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_core::plan::{
-    create_plan_from_toml, get_plan_with_tasks, materialize_plan, parse_plan_toml,
+    GenerateContext, build_system_prompt, create_plan_from_toml, detect_context,
+    get_plan_with_tasks, invariants_from_presets, materialize_plan, parse_plan_toml,
+    validate_generated_plan,
 };
 use gator_core::presets;
 use gator_db::models::{InvariantKind, InvariantScope};
@@ -38,7 +40,34 @@ pub async fn run_plan_command(command: PlanCommands, pool: Option<&PgPool>) -> R
             project_type,
             no_register,
             output,
-        } => cmd_plan_init(pool, &name, project_type.as_deref(), no_register, output.as_deref()).await,
+        } => {
+            cmd_plan_init(
+                pool,
+                &name,
+                project_type.as_deref(),
+                no_register,
+                output.as_deref(),
+            )
+            .await
+        }
+        PlanCommands::Generate {
+            description,
+            file,
+            output,
+            base_branch,
+            no_validate,
+            dry_run,
+        } => {
+            cmd_plan_generate(
+                description,
+                file,
+                &output,
+                base_branch.as_deref(),
+                no_validate,
+                dry_run,
+            )
+            .await
+        }
         PlanCommands::Create { file } => {
             let pool = pool.context("database connection required for plan create")?;
             cmd_create(pool, &file).await
@@ -174,7 +203,10 @@ async fn cmd_plan_init(
     println!();
     println!("Next steps:");
     println!("  1. Edit {} to describe your tasks", output_path);
-    println!("  2. Run `gator plan create {}` to load it into the database", output_path);
+    println!(
+        "  2. Run `gator plan create {}` to load it into the database",
+        output_path
+    );
     println!("  3. Run `gator plan approve <plan-id>` to approve it");
     println!("  4. Run `gator dispatch <plan-id>` to start execution");
 
@@ -263,6 +295,171 @@ fn generate_plan_toml(name: &str, base_branch: &str, invariant_names: &[&str]) -
     out.push_str("# harness = \"claude-code\"\n");
 
     out
+}
+
+// -----------------------------------------------------------------------
+// gator plan generate [DESCRIPTION]
+// -----------------------------------------------------------------------
+
+/// Generate a plan TOML by spawning Claude Code with assembled context.
+///
+/// Operates without a database connection -- invariants come from embedded
+/// presets and the plan is written to a local file.
+async fn cmd_plan_generate(
+    description: Option<String>,
+    file: Option<String>,
+    output: &str,
+    base_branch_override: Option<&str>,
+    no_validate: bool,
+    dry_run: bool,
+) -> Result<()> {
+    // 1. Check output file does not already exist.
+    if Path::new(output).exists() {
+        bail!(
+            "output file {:?} already exists. Remove it or use --output to specify a different path.",
+            output
+        );
+    }
+
+    // 2. Resolve description from --file (mutually exclusive with positional arg).
+    let desc = match (&description, &file) {
+        (Some(_), Some(_)) => bail!("cannot specify both a description argument and --file"),
+        (_, Some(path)) => {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read description file: {path}"))?;
+            let trimmed = content.trim().to_string();
+            if trimmed.is_empty() {
+                bail!("description file {:?} is empty", path);
+            }
+            Some(trimmed)
+        }
+        (Some(d), None) => Some(d.clone()),
+        (None, None) => None,
+    };
+
+    // 3. Detect context.
+    let cwd = std::env::current_dir().context("failed to get current directory")?;
+    let (base_branch, project_type) = detect_context(&cwd, base_branch_override);
+
+    // 4. Load invariant presets.
+    let invariants = invariants_from_presets(project_type.as_deref());
+
+    // 5. Build system prompt.
+    let ctx = GenerateContext {
+        base_branch: base_branch.clone(),
+        project_type: project_type.clone(),
+        invariants,
+        output_path: output.to_string(),
+    };
+    let system_prompt = build_system_prompt(&ctx);
+
+    // 6. Dry-run: print prompt and exit.
+    if dry_run {
+        println!("{system_prompt}");
+        return Ok(());
+    }
+
+    // 7. Print context summary.
+    let mode = if desc.is_some() {
+        "one-shot"
+    } else {
+        "interactive"
+    };
+    println!("Generating plan...");
+    println!("  Base branch:  {}", base_branch);
+    println!(
+        "  Project type: {}",
+        project_type.as_deref().unwrap_or("unknown")
+    );
+    println!("  Mode:         {mode}");
+    println!("  Output:       {output}");
+    println!();
+
+    if desc.is_none() {
+        println!("Starting Claude Code in interactive mode.");
+        println!("Describe your feature and Claude will explore the codebase,");
+        println!("ask clarifying questions, then write the plan TOML.");
+        println!();
+    }
+
+    // 8. Spawn Claude Code.
+    let mut cmd = std::process::Command::new("claude");
+
+    // Common flags for both modes: prevent plan mode and skill interference.
+    cmd.arg("--append-system-prompt")
+        .arg(&system_prompt)
+        .arg("--disallowedTools")
+        .arg("EnterPlanMode")
+        .arg("--disable-slash-commands");
+
+    match &desc {
+        Some(d) => {
+            cmd.arg("-p")
+                .arg(d)
+                .arg("--dangerously-skip-permissions")
+                .arg("--allowedTools")
+                .arg("Bash,Read,Write,Glob,Grep");
+        }
+        None => {
+            // Interactive mode: no extra flags needed.
+        }
+    }
+    cmd.current_dir(&cwd)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+
+    let status = cmd
+        .status()
+        .context("failed to spawn claude -- is it installed and on PATH?")?;
+
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        bail!("claude exited with status {code}");
+    }
+
+    // 9. Post-generation validation.
+    if no_validate {
+        if !Path::new(output).exists() {
+            println!("Warning: output file {:?} was not created.", output);
+        } else {
+            println!("Plan written to {output} (validation skipped).");
+        }
+        return Ok(());
+    }
+
+    match validate_generated_plan(output) {
+        Ok(plan) => {
+            // Print summary.
+            let task_count = plan.tasks.len();
+            let dep_edges: usize = plan.tasks.iter().map(|t| t.depends_on.len()).sum();
+            let root_tasks = plan
+                .tasks
+                .iter()
+                .filter(|t| t.depends_on.is_empty())
+                .count();
+
+            println!();
+            println!("Plan validated successfully.");
+            println!("  Name:       {}", plan.plan.name);
+            println!("  Tasks:      {task_count}");
+            println!("  Dep edges:  {dep_edges}");
+            println!("  Root tasks: {root_tasks}");
+            println!();
+            println!("Next: gator plan create {output}");
+        }
+        Err(e) => {
+            eprintln!();
+            eprintln!("Plan validation failed: {e}");
+            eprintln!();
+            eprintln!("You can:");
+            eprintln!("  1. Edit {output} manually to fix the issue");
+            eprintln!("  2. Remove {output} and re-run `gator plan generate`");
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
 }
 
 // -----------------------------------------------------------------------
@@ -668,5 +865,87 @@ mod tests {
     fn clap_plan_init_missing_name_fails() {
         let result = TestCli::try_parse_from(["gator", "plan", "init"]);
         assert!(result.is_err(), "missing name should fail");
+    }
+
+    // -- plan generate CLI parsing tests --
+
+    #[test]
+    fn clap_parses_plan_generate_with_description() {
+        let cli = TestCli::try_parse_from(["gator", "plan", "generate", "Add user authentication"])
+            .expect("should parse");
+        match cli.command {
+            TestCommands::Plan {
+                command:
+                    PlanCommands::Generate {
+                        description,
+                        file,
+                        output,
+                        base_branch,
+                        no_validate,
+                        dry_run,
+                    },
+            } => {
+                assert_eq!(description.as_deref(), Some("Add user authentication"));
+                assert!(file.is_none());
+                assert_eq!(output, "plan.toml");
+                assert!(base_branch.is_none());
+                assert!(!no_validate);
+                assert!(!dry_run);
+            }
+            _ => panic!("expected Plan Generate"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_plan_generate_interactive() {
+        let cli = TestCli::try_parse_from(["gator", "plan", "generate"]).expect("should parse");
+        match cli.command {
+            TestCommands::Plan {
+                command: PlanCommands::Generate { description, .. },
+            } => {
+                assert!(description.is_none());
+            }
+            _ => panic!("expected Plan Generate"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_plan_generate_all_options() {
+        let cli = TestCli::try_parse_from([
+            "gator",
+            "plan",
+            "generate",
+            "Add auth",
+            "--file",
+            "desc.md",
+            "--output",
+            "auth.toml",
+            "--base-branch",
+            "develop",
+            "--no-validate",
+            "--dry-run",
+        ])
+        .expect("should parse");
+        match cli.command {
+            TestCommands::Plan {
+                command:
+                    PlanCommands::Generate {
+                        description,
+                        file,
+                        output,
+                        base_branch,
+                        no_validate,
+                        dry_run,
+                    },
+            } => {
+                assert_eq!(description.as_deref(), Some("Add auth"));
+                assert_eq!(file.as_deref(), Some("desc.md"));
+                assert_eq!(output, "auth.toml");
+                assert_eq!(base_branch.as_deref(), Some("develop"));
+                assert!(no_validate);
+                assert!(dry_run);
+            }
+            _ => panic!("expected Plan Generate"),
+        }
     }
 }
