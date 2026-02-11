@@ -1,6 +1,7 @@
 //! DAG-aware orchestrator: runs a plan to completion by spawning agents in
 //! topological order, enforcing concurrency limits, and handling retries.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -155,6 +156,7 @@ pub async fn run_orchestrator(
     let semaphore = Arc::new(Semaphore::new(config.max_agents));
     let (tx, mut rx) = mpsc::channel::<LifecycleDone>(config.max_agents * 2);
     let mut in_flight: usize = 0;
+    let mut in_flight_tasks: HashSet<Uuid> = HashSet::new();
 
     loop {
         // 3-pre. Check cancellation.
@@ -165,6 +167,7 @@ pub async fn run_orchestrator(
                 match tokio::time::timeout_at(drain_deadline, rx.recv()).await {
                     Ok(Some(done)) => {
                         in_flight -= 1;
+                        in_flight_tasks.remove(&done.task_id);
                         let _ = handle_lifecycle_result(pool, &done).await;
                     }
                     _ => break,
@@ -185,6 +188,7 @@ pub async fn run_orchestrator(
         // 3a. Drain completed results (non-blocking).
         while let Ok(done) = rx.try_recv() {
             in_flight -= 1;
+            in_flight_tasks.remove(&done.task_id);
             handle_lifecycle_result(pool, &done).await?;
         }
 
@@ -266,8 +270,12 @@ pub async fn run_orchestrator(
             continue;
         }
 
-        // 3d. Spawn ready tasks.
+        // 3d. Spawn ready tasks (skip any already in flight).
         let ready = task_db::get_ready_tasks(pool, plan_id).await?;
+        let ready: Vec<_> = ready
+            .into_iter()
+            .filter(|t| !in_flight_tasks.contains(&t.id))
+            .collect();
         let spawned_any = !ready.is_empty();
 
         for task in ready {
@@ -311,6 +319,7 @@ pub async fn run_orchestrator(
             };
 
             in_flight += 1;
+            in_flight_tasks.insert(task_id);
 
             tokio::spawn(async move {
                 let Some(harness) = registry_clone.get(&harness_name) else {
@@ -365,6 +374,7 @@ pub async fn run_orchestrator(
                 done = rx.recv() => {
                     if let Some(done) = done {
                         in_flight -= 1;
+                        in_flight_tasks.remove(&done.task_id);
                         handle_lifecycle_result(pool, &done).await?;
                     }
                 }
