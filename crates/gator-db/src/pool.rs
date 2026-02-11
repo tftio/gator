@@ -113,4 +113,3 @@ pub async fn table_counts(pool: &PgPool) -> Result<Vec<(String, i64)>> {
     }
     Ok(counts)
 }
-

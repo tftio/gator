@@ -68,9 +68,7 @@ pub fn create_isolation(
             Ok(Arc::new(worktree::WorktreeIsolation::new(mgr)))
         }
         "container" => {
-            let image = container_image
-                .unwrap_or("ubuntu:24.04")
-                .to_string();
+            let image = container_image.unwrap_or("ubuntu:24.04").to_string();
             let mgr = crate::worktree::WorktreeManager::new(repo_path, None)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let config = container::ContainerConfig {

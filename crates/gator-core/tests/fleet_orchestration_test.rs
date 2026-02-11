@@ -19,10 +19,10 @@ use uuid::Uuid;
 
 use gator_db::models::{InvariantKind, InvariantScope, PlanStatus, TaskStatus};
 use gator_db::queries::agent_events;
-use gator_test_utils::{create_test_db, drop_test_db};
 use gator_db::queries::invariants::{self, NewInvariant};
 use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
+use gator_test_utils::{create_test_db, drop_test_db};
 
 use gator_core::harness::types::{AgentEvent, AgentHandle, MaterializedTask};
 use gator_core::harness::{Harness, HarnessRegistry};

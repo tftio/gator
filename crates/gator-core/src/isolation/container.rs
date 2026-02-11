@@ -69,10 +69,7 @@ impl ContainerIsolation {
     ///
     /// Uses a tar pipe to exclude `.git` during the copy:
     ///   tar -C <host_path> --exclude='.git' -cf - . | docker cp - <cid>:/workspace
-    async fn copy_into_container(
-        container_id: &str,
-        host_path: &std::path::Path,
-    ) -> Result<()> {
+    async fn copy_into_container(container_id: &str, host_path: &std::path::Path) -> Result<()> {
         // First create the /workspace directory inside the container.
         let mkdir_output = Command::new("docker")
             .args(["exec", container_id, "mkdir", "-p", "/workspace"])
@@ -111,10 +108,7 @@ impl ContainerIsolation {
     ///
     /// Uses a tar pipe:
     ///   docker cp <cid>:/workspace/. - | tar -C <dest> --exclude='.git' -xf -
-    async fn copy_from_container(
-        container_id: &str,
-        dest_path: &std::path::Path,
-    ) -> Result<()> {
+    async fn copy_from_container(container_id: &str, dest_path: &std::path::Path) -> Result<()> {
         let tar_cmd = format!(
             "docker cp {}:/workspace/. - | tar -C {} --exclude='.git' -xf -",
             container_id,
@@ -158,9 +152,7 @@ impl Isolation for ContainerIsolation {
             .worktree_manager
             .create_worktree(&branch_name)
             .map_err(|e| anyhow::anyhow!("{e}"))
-            .with_context(|| {
-                format!("failed to create worktree for {plan_name}/{task_name}")
-            })?;
+            .with_context(|| format!("failed to create worktree for {plan_name}/{task_name}"))?;
 
         let host_worktree_path = wt_info.path.clone();
 
@@ -271,9 +263,7 @@ impl Isolation for ContainerIsolation {
             self.worktree_manager
                 .remove_worktree(host_path)
                 .map_err(|e| anyhow::anyhow!("{e}"))
-                .with_context(|| {
-                    format!("failed to remove worktree at {}", host_path.display())
-                })?;
+                .with_context(|| format!("failed to remove worktree at {}", host_path.display()))?;
         }
 
         Ok(())

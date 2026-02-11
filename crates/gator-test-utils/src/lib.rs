@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
-use testcontainers::runners::AsyncRunner;
-use testcontainers::ImageExt;
 use testcontainers::ContainerAsync;
+use testcontainers::ImageExt;
+use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres::Postgres;
 use tokio::sync::OnceCell;
 use uuid::Uuid;

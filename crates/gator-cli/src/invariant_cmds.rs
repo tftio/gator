@@ -54,9 +54,7 @@ pub async fn run_invariant_command(command: InvariantCommands, pool: &PgPool) ->
         InvariantCommands::List { verbose } => cmd_list(pool, verbose).await,
         InvariantCommands::Test { name } => cmd_test(pool, &name).await,
         InvariantCommands::Presets { command } => match command {
-            PresetCommands::List { project_type } => {
-                cmd_presets_list(project_type.as_deref())
-            }
+            PresetCommands::List { project_type } => cmd_presets_list(project_type.as_deref()),
             PresetCommands::Install { project_type } => {
                 cmd_presets_install(pool, project_type.as_deref()).await
             }
@@ -307,7 +305,10 @@ fn cmd_presets_list(project_type_filter: Option<&str>) -> Result<()> {
                     known.join(", ")
                 );
             }
-            all_presets.iter().filter(|p| p.project_type == pt).collect()
+            all_presets
+                .iter()
+                .filter(|p| p.project_type == pt)
+                .collect()
         }
         None => all_presets.iter().collect(),
     };
@@ -352,10 +353,7 @@ fn cmd_presets_list(project_type_filter: Option<&str>) -> Result<()> {
     }
 
     println!();
-    println!(
-        "{} preset(s) available.",
-        filtered.len()
-    );
+    println!("{} preset(s) available.", filtered.len());
 
     Ok(())
 }
@@ -487,9 +485,10 @@ mod tests {
             .expect("should parse");
         match cli.command {
             TestCommands::Invariant {
-                command: InvariantCommands::Presets {
-                    command: PresetCommands::List { project_type },
-                },
+                command:
+                    InvariantCommands::Presets {
+                        command: PresetCommands::List { project_type },
+                    },
             } => {
                 assert!(project_type.is_none());
             }
@@ -510,9 +509,10 @@ mod tests {
         .expect("should parse");
         match cli.command {
             TestCommands::Invariant {
-                command: InvariantCommands::Presets {
-                    command: PresetCommands::List { project_type },
-                },
+                command:
+                    InvariantCommands::Presets {
+                        command: PresetCommands::List { project_type },
+                    },
             } => {
                 assert_eq!(project_type.as_deref(), Some("rust"));
             }
@@ -526,9 +526,10 @@ mod tests {
             .expect("should parse");
         match cli.command {
             TestCommands::Invariant {
-                command: InvariantCommands::Presets {
-                    command: PresetCommands::Install { project_type },
-                },
+                command:
+                    InvariantCommands::Presets {
+                        command: PresetCommands::Install { project_type },
+                    },
             } => {
                 assert!(project_type.is_none());
             }
@@ -549,9 +550,10 @@ mod tests {
         .expect("should parse");
         match cli.command {
             TestCommands::Invariant {
-                command: InvariantCommands::Presets {
-                    command: PresetCommands::Install { project_type },
-                },
+                command:
+                    InvariantCommands::Presets {
+                        command: PresetCommands::Install { project_type },
+                    },
             } => {
                 assert_eq!(project_type.as_deref(), Some("python"));
             }

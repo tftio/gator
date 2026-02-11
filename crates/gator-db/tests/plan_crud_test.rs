@@ -270,9 +270,18 @@ async fn list_tasks_for_plan_returns_correct_tasks() {
 async fn update_task_status_succeeds() {
     let (pool, db_name) = create_test_db().await;
 
-    let plan = plans::insert_plan(&pool, "p", "/tmp", "main", None, "claude-code", "worktree", None)
-        .await
-        .unwrap();
+    let plan = plans::insert_plan(
+        &pool,
+        "p",
+        "/tmp",
+        "main",
+        None,
+        "claude-code",
+        "worktree",
+        None,
+    )
+    .await
+    .unwrap();
     let task = tasks::insert_task(&pool, plan.id, "t", "d", "narrow", "auto", 3, None)
         .await
         .unwrap();
