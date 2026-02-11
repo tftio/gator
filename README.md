@@ -15,6 +15,28 @@ manages the full lifecycle through to merge and PR creation.
 
 ## Install
 
+### From GitHub Releases (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tftio/gator/main/scripts/install.sh | bash
+```
+
+Options via environment variables:
+
+```bash
+# Install a specific version
+GATOR_VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/tftio/gator/main/scripts/install.sh | bash
+
+# Install to a custom directory
+INSTALL_DIR=/opt/bin curl -fsSL https://raw.githubusercontent.com/tftio/gator/main/scripts/install.sh | bash
+```
+
+Pre-built binaries are available for:
+- Linux x86_64 / aarch64
+- macOS x86_64 / aarch64 (Apple Silicon)
+
+### From source
+
 ```
 cargo install --path crates/gator-cli
 ```
