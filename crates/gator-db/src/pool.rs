@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -7,6 +6,9 @@ use sqlx::{Executor, PgPool};
 use tracing::info;
 
 use crate::config::DbConfig;
+
+/// Migrations embedded at compile time from `crates/gator-db/migrations/`.
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 /// Create a connection pool with sensible defaults.
 pub async fn create_pool(config: &DbConfig) -> Result<PgPool> {
@@ -19,21 +21,9 @@ pub async fn create_pool(config: &DbConfig) -> Result<PgPool> {
     Ok(pool)
 }
 
-/// Run all pending migrations from the given directory against the pool.
-///
-/// Uses a runtime `Migrator` so that no running database is required at
-/// compile time (unlike the `sqlx::migrate!()` macro).
-pub async fn run_migrations(pool: &PgPool, migrations_dir: &Path) -> Result<()> {
-    let migrator = sqlx::migrate::Migrator::new(migrations_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to load migrations from {}",
-                migrations_dir.display()
-            )
-        })?;
-
-    migrator
+/// Run all pending embedded migrations against the pool.
+pub async fn run_migrations(pool: &PgPool) -> Result<()> {
+    MIGRATOR
         .run(pool)
         .await
         .context("failed to run database migrations")?;
@@ -124,15 +114,3 @@ pub async fn table_counts(pool: &PgPool) -> Result<Vec<(String, i64)>> {
     Ok(counts)
 }
 
-/// Return the default path to the migrations directory shipped with
-/// `gator-db`.
-///
-/// At runtime this resolves relative to the `gator-db` crate's source tree
-/// via the `CARGO_MANIFEST_DIR` compile-time env.  For installed binaries
-/// (where the source tree is absent) the migrations are embedded at compile
-/// time by the caller instead.
-pub fn default_migrations_path() -> &'static Path {
-    // CARGO_MANIFEST_DIR is set at *compile* time for the crate being
-    // compiled, so this points at crates/gator-db/.
-    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
-}

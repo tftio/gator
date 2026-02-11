@@ -27,8 +27,7 @@ const EXPECTED_TABLES: &[&str] = &[
 async fn migrations_create_all_tables() {
     let (temp_pool, db_name) = create_test_db().await;
 
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
+    pool::run_migrations(&temp_pool)
         .await
         .expect("migrations should succeed");
 
@@ -63,14 +62,13 @@ async fn migrations_create_all_tables() {
 #[tokio::test]
 async fn migrations_are_idempotent() {
     let (temp_pool, db_name) = create_test_db().await;
-    let migrations_path = pool::default_migrations_path();
 
     // Run migrations twice -- second run should be a no-op.
-    pool::run_migrations(&temp_pool, migrations_path)
+    pool::run_migrations(&temp_pool)
         .await
         .expect("first migration run should succeed");
 
-    pool::run_migrations(&temp_pool, migrations_path)
+    pool::run_migrations(&temp_pool)
         .await
         .expect("second migration run should succeed (idempotent)");
 
@@ -93,8 +91,7 @@ async fn migrations_are_idempotent() {
 async fn pool_creates_and_destroys_cleanly() {
     let (temp_pool, db_name) = create_test_db().await;
 
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
+    pool::run_migrations(&temp_pool)
         .await
         .expect("migrations should succeed");
 
@@ -115,8 +112,7 @@ async fn pool_creates_and_destroys_cleanly() {
 async fn table_counts_returns_expected_tables() {
     let (temp_pool, db_name) = create_test_db().await;
 
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
+    pool::run_migrations(&temp_pool)
         .await
         .expect("migrations should succeed");
 

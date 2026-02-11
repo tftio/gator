@@ -104,8 +104,7 @@ pub async fn create_test_db() -> (PgPool, String) {
         .await
         .unwrap_or_else(|e| panic!("failed to connect to temp database {db_name}: {e}"));
 
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&temp_pool, migrations_path)
+    pool::run_migrations(&temp_pool)
         .await
         .expect("migrations should succeed");
 

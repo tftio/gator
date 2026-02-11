@@ -366,8 +366,7 @@ async fn cmd_db_init(cli_db_url: Option<&str>) -> anyhow::Result<()> {
     let db_pool = pool::create_pool(&resolved.db_config).await?;
 
     // 3. Run migrations.
-    let migrations_path = pool::default_migrations_path();
-    pool::run_migrations(&db_pool, migrations_path).await?;
+    pool::run_migrations(&db_pool).await?;
 
     // 4. Print success with table counts.
     let counts = pool::table_counts(&db_pool).await?;

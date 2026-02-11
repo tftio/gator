@@ -8,6 +8,7 @@ use crate::models::{Plan, PlanStatus};
 
 /// Insert a new plan row. Returns the inserted plan with server-generated
 /// defaults (id, created_at, status).
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_plan(
     pool: &PgPool,
     name: &str,
