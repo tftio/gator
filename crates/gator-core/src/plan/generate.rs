@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use crate::plan::parser::PlanParseError;
-use crate::plan::toml_format::PlanToml;
+use crate::plan::toml_format::{PlanMeta, PlanToml, TaskToml};
 use crate::presets::{self, InvariantPreset};
 
 // ---------------------------------------------------------------------------
@@ -256,6 +256,42 @@ pub fn build_system_prompt(ctx: &GenerateContext) -> String {
     }
 
     prompt
+}
+
+// ---------------------------------------------------------------------------
+// Meta-plan construction
+// ---------------------------------------------------------------------------
+
+/// Build a `PlanToml` for a meta-plan that generates a plan TOML file.
+///
+/// The meta-plan has a single task ("write-plan") that runs Claude Code with
+/// the given system prompt. It references two invariants that validate the
+/// generated plan file exists and parses correctly.
+pub fn build_meta_plan(system_prompt: &str, base_branch: &str, gate: &str) -> PlanToml {
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    PlanToml {
+        plan: PlanMeta {
+            name: format!("_plan-gen-{timestamp}"),
+            base_branch: base_branch.to_string(),
+            token_budget: None,
+            default_harness: "claude-code".to_string(),
+            isolation: "worktree".to_string(),
+            container_image: None,
+        },
+        tasks: vec![TaskToml {
+            name: "write-plan".to_string(),
+            description: system_prompt.to_string(),
+            scope: "narrow".to_string(),
+            gate: gate.to_string(),
+            retry_max: 2,
+            depends_on: vec![],
+            invariants: vec![
+                "_gator_plan_file_exists".to_string(),
+                "_gator_plan_validates".to_string(),
+            ],
+            harness: None,
+        }],
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -524,5 +560,54 @@ invariants = ["check"]
         let info = InvariantInfo::from(preset);
         assert_eq!(info.name, "rust_build");
         assert_eq!(info.command, "cargo");
+    }
+
+    // -- build_meta_plan tests --
+
+    #[test]
+    fn build_meta_plan_structure() {
+        let plan = build_meta_plan("Write a plan", "main", "human_review");
+
+        assert!(plan.plan.name.starts_with("_plan-gen-"));
+        assert_eq!(plan.plan.base_branch, "main");
+        assert_eq!(plan.plan.default_harness, "claude-code");
+        assert_eq!(plan.plan.isolation, "worktree");
+        assert!(plan.plan.token_budget.is_none());
+        assert!(plan.plan.container_image.is_none());
+
+        assert_eq!(plan.tasks.len(), 1);
+        let task = &plan.tasks[0];
+        assert_eq!(task.name, "write-plan");
+        assert_eq!(task.description, "Write a plan");
+        assert_eq!(task.scope, "narrow");
+        assert_eq!(task.gate, "human_review");
+        assert_eq!(task.retry_max, 2);
+        assert!(task.depends_on.is_empty());
+        assert_eq!(
+            task.invariants,
+            vec!["_gator_plan_file_exists", "_gator_plan_validates"]
+        );
+        assert!(task.harness.is_none());
+    }
+
+    #[test]
+    fn build_meta_plan_uses_timestamp() {
+        let plan = build_meta_plan("prompt", "develop", "auto");
+        assert!(
+            plan.plan.name.starts_with("_plan-gen-"),
+            "name should start with _plan-gen-, got: {}",
+            plan.plan.name
+        );
+        // Name should be longer than just the prefix (has timestamp).
+        assert!(plan.plan.name.len() > "_plan-gen-".len());
+    }
+
+    #[test]
+    fn build_meta_plan_respects_gate_policy() {
+        let auto = build_meta_plan("p", "main", "auto");
+        assert_eq!(auto.tasks[0].gate, "auto");
+
+        let approve = build_meta_plan("p", "main", "human_approve");
+        assert_eq!(approve.tasks[0].gate, "human_approve");
     }
 }

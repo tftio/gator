@@ -2,6 +2,7 @@ mod agent;
 mod cleanup_cmd;
 mod config;
 mod dispatch_cmd;
+mod export_cmd;
 mod gate_cmd;
 mod invariant_cmds;
 mod log_cmd;
@@ -33,7 +34,7 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Write a gator config file (no database required)
     Init {
@@ -151,6 +152,11 @@ pub enum Commands {
     },
     /// Launch interactive TUI dashboard
     Dashboard,
+    /// Export data in machine-readable formats
+    Export {
+        #[command(subcommand)]
+        command: ExportCommands,
+    },
     /// Read your assigned task (agent mode)
     Task,
     /// Run invariants for your task (agent mode)
@@ -164,7 +170,7 @@ pub enum Commands {
     Done,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum PlanCommands {
     /// Scaffold a new plan TOML with project-aware defaults
     Init {
@@ -179,6 +185,34 @@ pub enum PlanCommands {
         /// Output file path (defaults to <name>.toml)
         #[arg(long, short)]
         output: Option<String>,
+    },
+    /// Generate a plan TOML using Claude Code
+    Generate {
+        /// Feature description (if omitted, runs interactively)
+        description: Option<String>,
+        /// Read description from a file instead of positional arg
+        #[arg(long)]
+        file: Option<String>,
+        /// Output file path
+        #[arg(long, short, default_value = "plan.toml")]
+        output: String,
+        /// Override auto-detected base branch
+        #[arg(long)]
+        base_branch: Option<String>,
+        /// Skip post-generation validation
+        #[arg(long)]
+        no_validate: bool,
+        /// Print assembled prompt without spawning Claude
+        #[arg(long)]
+        dry_run: bool,
+        /// Gate policy for plan generation (default: human_review)
+        #[arg(long, default_value = "human_review")]
+        gate: String,
+    },
+    /// Validate a plan TOML file (parse and check structure)
+    Validate {
+        /// Path to the plan TOML file
+        file: String,
     },
     /// Create a plan from a TOML file
     Create {
@@ -205,7 +239,7 @@ pub enum PlanCommands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum InvariantCommands {
     /// Add a new invariant definition
     Add {
@@ -254,7 +288,7 @@ pub enum InvariantCommands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 pub enum PresetCommands {
     /// List available preset invariants
     List {
@@ -267,6 +301,18 @@ pub enum PresetCommands {
         /// Project type to install presets for (auto-detected if omitted)
         #[arg(long)]
         project_type: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ExportCommands {
+    /// Export plan/task data as CSV
+    Csv {
+        /// Plan ID to export (omit to export all plans)
+        plan_id: Option<String>,
+        /// Output file path (defaults to stdout)
+        #[arg(long)]
+        output: Option<String>,
     },
 }
 
@@ -386,14 +432,43 @@ async fn main() -> anyhow::Result<()> {
             cmd_db_init(cli.database_url.as_deref()).await?;
         }
         Commands::Plan { command } => {
-            // plan init can work without a database (--no-register mode).
-            if matches!(command, PlanCommands::Init { no_register: true, .. }) {
-                let result = plan_cmds::run_plan_command(command, None).await;
+            // Determine whether this subcommand needs the orchestrator (DB + token config)
+            // or can run without a database at all.
+            let needs_orchestrator = matches!(
+                &command,
+                PlanCommands::Generate {
+                    description: Some(_),
+                    dry_run: false,
+                    ..
+                }
+            );
+            let skip_db = matches!(
+                command,
+                PlanCommands::Init {
+                    no_register: true,
+                    ..
+                } | PlanCommands::Validate { .. }
+            ) || (matches!(command, PlanCommands::Generate { .. })
+                && !needs_orchestrator);
+
+            if skip_db {
+                let result = plan_cmds::run_plan_command(command, None, None).await;
+                result?;
+            } else if needs_orchestrator {
+                let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+                let db_pool = pool::create_pool(&resolved.db_config).await?;
+                let result = plan_cmds::run_plan_command(
+                    command,
+                    Some(&db_pool),
+                    Some(&resolved.token_config),
+                )
+                .await;
+                db_pool.close().await;
                 result?;
             } else {
                 let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
                 let db_pool = pool::create_pool(&resolved.db_config).await?;
-                let result = plan_cmds::run_plan_command(command, Some(&db_pool)).await;
+                let result = plan_cmds::run_plan_command(command, Some(&db_pool), None).await;
                 db_pool.close().await;
                 result?;
             }
@@ -523,6 +598,18 @@ async fn main() -> anyhow::Result<()> {
             let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
             let db_pool = pool::create_pool(&resolved.db_config).await?;
             let result = tui::run_dashboard(db_pool.clone()).await;
+            db_pool.close().await;
+            result?;
+        }
+        Commands::Export { command } => {
+            let resolved = GatorConfig::resolve(cli.database_url.as_deref())?;
+            let db_pool = pool::create_pool(&resolved.db_config).await?;
+            let result = match command {
+                ExportCommands::Csv { plan_id, output } => {
+                    export_cmd::run_export_csv(&db_pool, plan_id.as_deref(), output.as_deref())
+                        .await
+                }
+            };
             db_pool.close().await;
             result?;
         }

@@ -2,6 +2,8 @@
 //!
 //! Implements:
 //! - `gator plan init <name>`       -- scaffold a plan TOML with project-aware defaults
+//! - `gator plan generate [DESC]`   -- generate a plan TOML (interactive or orchestrated)
+//! - `gator plan validate <file>`   -- validate a plan TOML file
 //! - `gator plan create <file>`     -- create a plan from a TOML file
 //! - `gator plan show [plan-id]`    -- show plan details or list all plans
 //! - `gator plan approve <plan-id>` -- transition a plan from draft to approved
@@ -9,19 +11,29 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use sqlx::PgPool;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use gator_core::harness::{ClaudeCodeAdapter, HarnessRegistry};
+use gator_core::isolation;
+use gator_core::orchestrator::{OrchestratorConfig, OrchestratorResult, run_orchestrator};
 use gator_core::plan::{
-    GenerateContext, build_system_prompt, create_plan_from_toml, detect_context,
+    GenerateContext, build_meta_plan, build_system_prompt, create_plan_from_toml, detect_context,
     get_plan_with_tasks, invariants_from_presets, materialize_plan, parse_plan_toml,
     validate_generated_plan,
 };
 use gator_core::presets;
+use gator_core::token::TokenConfig;
 use gator_db::models::{InvariantKind, InvariantScope};
-use gator_db::queries::{invariants as inv_queries, plans as plan_queries, tasks as task_queries};
+use gator_db::queries::{
+    gate_results, invariants as inv_queries, plans as plan_queries, tasks as task_queries,
+};
 
 use crate::PlanCommands;
 
@@ -31,9 +43,16 @@ use crate::PlanCommands;
 
 /// Dispatch a `PlanCommands` variant to the appropriate handler.
 ///
-/// `pool` is `None` only for `plan init --no-register` (no DB needed).
-/// All other subcommands require a database connection.
-pub async fn run_plan_command(command: PlanCommands, pool: Option<&PgPool>) -> Result<()> {
+/// `pool` is `None` for commands that don't need a database (e.g.
+/// `plan init --no-register`, `plan validate`, interactive `plan generate`).
+///
+/// `token_config` is only needed for the orchestrated `plan generate` path
+/// (one-shot with a description).
+pub async fn run_plan_command(
+    command: PlanCommands,
+    pool: Option<&PgPool>,
+    token_config: Option<&TokenConfig>,
+) -> Result<()> {
     match command {
         PlanCommands::Init {
             name,
@@ -57,17 +76,22 @@ pub async fn run_plan_command(command: PlanCommands, pool: Option<&PgPool>) -> R
             base_branch,
             no_validate,
             dry_run,
+            gate,
         } => {
             cmd_plan_generate(
+                pool,
+                token_config,
                 description,
                 file,
                 &output,
                 base_branch.as_deref(),
                 no_validate,
                 dry_run,
+                &gate,
             )
             .await
         }
+        PlanCommands::Validate { file } => cmd_plan_validate(&file),
         PlanCommands::Create { file } => {
             let pool = pool.context("database connection required for plan create")?;
             cmd_create(pool, &file).await
@@ -257,6 +281,67 @@ async fn register_presets(
     Ok((registered, skipped))
 }
 
+// -----------------------------------------------------------------------
+// gator plan validate <file>
+// -----------------------------------------------------------------------
+
+/// Validate a plan TOML file: parse and check structure.
+///
+/// Exits 0 on success, non-zero on failure.
+fn cmd_plan_validate(file: &str) -> Result<()> {
+    match validate_generated_plan(file) {
+        Ok(plan) => {
+            println!("Valid. {} task(s).", plan.tasks.len());
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Validation failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+// gator plan generate -- helpers
+// -----------------------------------------------------------------------
+
+/// Ensure plan-generation invariants exist in the database (idempotent).
+async fn ensure_plan_gen_invariants(pool: &PgPool) -> Result<()> {
+    let invariants = [
+        inv_queries::NewInvariant {
+            name: "_gator_plan_file_exists",
+            description: Some("Check that plan.toml was created"),
+            kind: InvariantKind::Custom,
+            command: "test",
+            args: &["-f".into(), "plan.toml".into()],
+            expected_exit_code: 0,
+            threshold: None,
+            scope: InvariantScope::Global,
+            timeout_secs: 10,
+        },
+        inv_queries::NewInvariant {
+            name: "_gator_plan_validates",
+            description: Some("Validate plan.toml parses and has valid structure"),
+            kind: InvariantKind::Custom,
+            command: "gator",
+            args: &["plan".into(), "validate".into(), "plan.toml".into()],
+            expected_exit_code: 0,
+            threshold: None,
+            scope: InvariantScope::Global,
+            timeout_secs: 30,
+        },
+    ];
+    for inv in &invariants {
+        if inv_queries::get_invariant_by_name(pool, inv.name)
+            .await?
+            .is_none()
+        {
+            inv_queries::insert_invariant(pool, inv).await?;
+        }
+    }
+    Ok(())
+}
+
 /// Generate plan TOML content with comments showing optional fields.
 ///
 /// The output is hand-built (not `toml::to_string`) to include comments,
@@ -303,15 +388,21 @@ fn generate_plan_toml(name: &str, base_branch: &str, invariant_names: &[&str]) -
 
 /// Generate a plan TOML by spawning Claude Code with assembled context.
 ///
-/// Operates without a database connection -- invariants come from embedded
-/// presets and the plan is written to a local file.
+/// Two modes:
+/// - **Interactive** (no description): spawns Claude Code directly with inherited I/O.
+/// - **One-shot** (description provided): creates a meta-plan in the database, runs
+///   the orchestrator, and validates the output with invariant gates.
+#[allow(clippy::too_many_arguments)]
 async fn cmd_plan_generate(
+    pool: Option<&PgPool>,
+    token_config: Option<&TokenConfig>,
     description: Option<String>,
     file: Option<String>,
     output: &str,
     base_branch_override: Option<&str>,
     no_validate: bool,
     dry_run: bool,
+    gate: &str,
 ) -> Result<()> {
     // 1. Check output file does not already exist.
     if Path::new(output).exists() {
@@ -344,12 +435,14 @@ async fn cmd_plan_generate(
     // 4. Load invariant presets.
     let invariants = invariants_from_presets(project_type.as_deref());
 
-    // 5. Build system prompt.
+    // 5. Build system prompt. For the orchestrated path the agent writes to
+    //    "plan.toml" (relative to its worktree), not the user's --output path.
+    let prompt_output = if desc.is_some() { "plan.toml" } else { output };
     let ctx = GenerateContext {
         base_branch: base_branch.clone(),
         project_type: project_type.clone(),
         invariants,
-        output_path: output.to_string(),
+        output_path: prompt_output.to_string(),
     };
     let system_prompt = build_system_prompt(&ctx);
 
@@ -361,7 +454,7 @@ async fn cmd_plan_generate(
 
     // 7. Print context summary.
     let mode = if desc.is_some() {
-        "one-shot"
+        "one-shot (orchestrated)"
     } else {
         "interactive"
     };
@@ -375,36 +468,103 @@ async fn cmd_plan_generate(
     println!("  Output:       {output}");
     println!();
 
+    // 8. Interactive mode: spawn Claude Code directly.
     if desc.is_none() {
         println!("Starting Claude Code in interactive mode.");
         println!("Describe your feature and Claude will explore the codebase,");
         println!("ask clarifying questions, then write the plan TOML.");
         println!();
+
+        return cmd_plan_generate_interactive(&cwd, &system_prompt, output, no_validate);
     }
 
-    // 8. Spawn Claude Code.
+    // 9. One-shot mode: orchestrated pipeline.
+    let pool = pool.context(
+        "one-shot plan generate requires a database (run `gator init` and `gator db-init`)",
+    )?;
+    let token_config =
+        token_config.context("one-shot plan generate requires token config (run `gator init`)")?;
+
+    // a. Ensure plan-generation invariants exist.
+    ensure_plan_gen_invariants(pool).await?;
+
+    // b. Build meta-plan.
+    let meta_plan = build_meta_plan(&system_prompt, &base_branch, gate);
+
+    // c. Create and approve.
+    let project_path = cwd.to_string_lossy();
+    let (plan, warnings) = create_plan_from_toml(pool, &meta_plan, &project_path).await?;
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+    let plan = plan_queries::approve_plan(pool, plan.id).await?;
+
+    println!("  Meta-plan:    {} ({})", plan.name, plan.id);
+    println!("  Gate policy:  {gate}");
+    println!();
+
+    // d. Set up harness, isolation, orchestrator.
+    let mut registry = HarnessRegistry::new();
+    registry.register(ClaudeCodeAdapter::new());
+    let registry = Arc::new(registry);
+
+    let isolation_backend = isolation::create_isolation("worktree", &cwd, None)?;
+
+    let config = OrchestratorConfig {
+        max_agents: 1,
+        task_timeout: Duration::from_secs(1800),
+    };
+
+    // e. Graceful shutdown handler.
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    let got_first_signal = Arc::new(AtomicBool::new(false));
+    let got_first_clone = Arc::clone(&got_first_signal);
+
+    tokio::spawn(async move {
+        loop {
+            tokio::signal::ctrl_c().await.ok();
+            if got_first_clone.swap(true, Ordering::SeqCst) {
+                eprintln!("\nForce exit.");
+                std::process::exit(130);
+            }
+            eprintln!("\nShutting down gracefully (Ctrl+C again to force)...");
+            cancel_clone.cancel();
+        }
+    });
+
+    // f. Run orchestrator.
+    let result = run_orchestrator(
+        pool,
+        plan.id,
+        &registry,
+        &isolation_backend,
+        token_config,
+        &config,
+        cancel,
+    )
+    .await?;
+
+    // g. Handle result.
+    handle_generate_result(pool, plan.id, &result, output).await
+}
+
+/// Interactive mode: spawn Claude Code with inherited terminal I/O.
+fn cmd_plan_generate_interactive(
+    cwd: &Path,
+    system_prompt: &str,
+    output: &str,
+    no_validate: bool,
+) -> Result<()> {
     let mut cmd = std::process::Command::new("claude");
 
-    // Common flags for both modes: prevent plan mode and skill interference.
     cmd.arg("--append-system-prompt")
-        .arg(&system_prompt)
+        .arg(system_prompt)
         .arg("--disallowedTools")
         .arg("EnterPlanMode")
         .arg("--disable-slash-commands");
 
-    match &desc {
-        Some(d) => {
-            cmd.arg("-p")
-                .arg(d)
-                .arg("--dangerously-skip-permissions")
-                .arg("--allowedTools")
-                .arg("Bash,Read,Write,Glob,Grep");
-        }
-        None => {
-            // Interactive mode: no extra flags needed.
-        }
-    }
-    cmd.current_dir(&cwd)
+    cmd.current_dir(cwd)
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit());
@@ -418,7 +578,6 @@ async fn cmd_plan_generate(
         bail!("claude exited with status {code}");
     }
 
-    // 9. Post-generation validation.
     if no_validate {
         if !Path::new(output).exists() {
             println!("Warning: output file {:?} was not created.", output);
@@ -428,9 +587,13 @@ async fn cmd_plan_generate(
         return Ok(());
     }
 
+    print_validation_result(output)
+}
+
+/// Validate and print results for a generated plan file.
+fn print_validation_result(output: &str) -> Result<()> {
     match validate_generated_plan(output) {
         Ok(plan) => {
-            // Print summary.
             let task_count = plan.tasks.len();
             let dep_edges: usize = plan.tasks.iter().map(|t| t.depends_on.len()).sum();
             let root_tasks = plan
@@ -447,6 +610,7 @@ async fn cmd_plan_generate(
             println!("  Root tasks: {root_tasks}");
             println!();
             println!("Next: gator plan create {output}");
+            Ok(())
         }
         Err(e) => {
             eprintln!();
@@ -458,7 +622,94 @@ async fn cmd_plan_generate(
             std::process::exit(1);
         }
     }
+}
 
+/// Handle the orchestrator result after a one-shot plan generation run.
+async fn handle_generate_result(
+    pool: &PgPool,
+    plan_id: Uuid,
+    result: &OrchestratorResult,
+    output: &str,
+) -> Result<()> {
+    // Fetch the single task from the meta-plan.
+    let tasks = task_queries::list_tasks_for_plan(pool, plan_id).await?;
+    let task = tasks
+        .first()
+        .context("meta-plan has no tasks (unexpected)")?;
+
+    match result {
+        OrchestratorResult::Completed => {
+            // Auto gate: all invariants passed.
+            copy_plan_from_worktree(task.worktree_path.as_deref(), output)?;
+            println!("Plan generated and validated successfully.");
+            print_validation_result(output)?;
+            println!();
+            println!("Audit: gator status {plan_id}");
+            Ok(())
+        }
+        OrchestratorResult::HumanRequired { .. } => {
+            // Fetch gate results to check invariant outcomes.
+            let gate_results = gate_results::get_latest_gate_results(pool, task.id).await?;
+            let all_passed = gate_results.iter().all(|r| r.passed);
+
+            if all_passed {
+                copy_plan_from_worktree(task.worktree_path.as_deref(), output)?;
+                println!("Plan generated -- invariants passed, awaiting review.");
+                print_validation_result(output)?;
+                println!();
+                println!("Review the generated plan, then:");
+                println!("  gator plan create {output}");
+                println!();
+                println!("Audit: gator status {plan_id}");
+                Ok(())
+            } else {
+                eprintln!("Plan generation failed -- invariant check(s) failed:");
+                for r in &gate_results {
+                    let status = if r.passed { "PASS" } else { "FAIL" };
+                    eprintln!("  [{status}] {}", r.invariant_name);
+                    if let Some(ref stderr) = r.stderr {
+                        if !stderr.is_empty() {
+                            for line in stderr.lines().take(5) {
+                                eprintln!("    {line}");
+                            }
+                        }
+                    }
+                }
+                eprintln!();
+                eprintln!("Audit: gator status {plan_id}");
+                std::process::exit(1);
+            }
+        }
+        OrchestratorResult::Failed { failed_tasks } => {
+            eprintln!("Plan generation failed after all retries.");
+            for t in failed_tasks {
+                eprintln!("  - {t}");
+            }
+            eprintln!();
+            eprintln!("Audit: gator status {plan_id}");
+            std::process::exit(1);
+        }
+        OrchestratorResult::BudgetExceeded { used, budget } => {
+            eprintln!("Plan generation stopped: token budget exceeded ({used}/{budget}).");
+            std::process::exit(3);
+        }
+        OrchestratorResult::Interrupted => {
+            eprintln!("Plan generation interrupted.");
+            eprintln!("Audit: gator status {plan_id}");
+            std::process::exit(130);
+        }
+    }
+}
+
+/// Copy plan.toml from the task worktree to the user's output path.
+fn copy_plan_from_worktree(worktree_path: Option<&str>, output: &str) -> Result<()> {
+    let wt = worktree_path.context("task has no worktree path")?;
+    let src = Path::new(wt).join("plan.toml");
+    if !src.exists() {
+        bail!("plan.toml not found in worktree at {}", src.display());
+    }
+    std::fs::copy(&src, output)
+        .with_context(|| format!("failed to copy {} to {}", src.display(), output))?;
     Ok(())
 }
 
@@ -883,6 +1134,7 @@ mod tests {
                         base_branch,
                         no_validate,
                         dry_run,
+                        gate,
                     },
             } => {
                 assert_eq!(description.as_deref(), Some("Add user authentication"));
@@ -891,6 +1143,7 @@ mod tests {
                 assert!(base_branch.is_none());
                 assert!(!no_validate);
                 assert!(!dry_run);
+                assert_eq!(gate, "human_review");
             }
             _ => panic!("expected Plan Generate"),
         }
@@ -924,6 +1177,8 @@ mod tests {
             "develop",
             "--no-validate",
             "--dry-run",
+            "--gate",
+            "auto",
         ])
         .expect("should parse");
         match cli.command {
@@ -936,6 +1191,7 @@ mod tests {
                         base_branch,
                         no_validate,
                         dry_run,
+                        gate,
                     },
             } => {
                 assert_eq!(description.as_deref(), Some("Add auth"));
@@ -944,8 +1200,23 @@ mod tests {
                 assert_eq!(base_branch.as_deref(), Some("develop"));
                 assert!(no_validate);
                 assert!(dry_run);
+                assert_eq!(gate, "auto");
             }
             _ => panic!("expected Plan Generate"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_plan_validate() {
+        let cli = TestCli::try_parse_from(["gator", "plan", "validate", "plan.toml"])
+            .expect("should parse");
+        match cli.command {
+            TestCommands::Plan {
+                command: PlanCommands::Validate { file },
+            } => {
+                assert_eq!(file, "plan.toml");
+            }
+            _ => panic!("expected Plan Validate"),
         }
     }
 }

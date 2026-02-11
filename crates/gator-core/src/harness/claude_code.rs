@@ -296,6 +296,7 @@ impl Harness for ClaudeCodeAdapter {
             .arg("--dangerously-skip-permissions")
             .arg("--allowedTools")
             .arg("Bash,Read,Edit,Write,Glob,Grep")
+            .arg("--disable-slash-commands")
             .arg("--append-system-prompt")
             .arg(&system_instructions);
 
