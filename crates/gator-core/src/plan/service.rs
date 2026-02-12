@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -24,13 +24,13 @@ use super::toml_format::PlanToml;
 /// `project_path` is the filesystem path of the project this plan belongs to.
 ///
 /// Invariant names referenced in the TOML are resolved to UUIDs by looking
-/// them up in the `invariants` table. Unknown invariant names are collected
-/// and returned as warnings but do not prevent plan creation.
+/// them up in the `invariants` table. If any referenced invariant does not
+/// exist, the entire operation fails and the transaction is rolled back.
 pub async fn create_plan_from_toml(
     pool: &PgPool,
     plan_toml: &PlanToml,
     project_path: &str,
-) -> Result<(Plan, Vec<String>)> {
+) -> Result<Plan> {
     let mut tx = pool.begin().await.context("failed to begin transaction")?;
 
     // 1. Insert the plan row.
@@ -96,7 +96,7 @@ pub async fn create_plan_from_toml(
     }
 
     // 4. Link invariants by name (look up each name in the invariants table).
-    let mut warnings: Vec<String> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
 
     for task_toml in &plan_toml.tasks {
         let task_id = task_name_to_id[&task_toml.name];
@@ -126,7 +126,7 @@ pub async fn create_plan_from_toml(
                     })?;
                 }
                 None => {
-                    warnings.push(format!(
+                    missing.push(format!(
                         "invariant {:?} referenced by task {:?} does not exist in the database",
                         inv_name, task_toml.name
                     ));
@@ -135,9 +135,17 @@ pub async fn create_plan_from_toml(
         }
     }
 
+    if !missing.is_empty() {
+        // Transaction rolls back on drop (no commit).
+        bail!(
+            "plan references unknown invariants:\n  {}",
+            missing.join("\n  ")
+        );
+    }
+
     tx.commit().await.context("failed to commit transaction")?;
 
-    Ok((plan, warnings))
+    Ok(plan)
 }
 
 /// Fetch a plan and all its tasks.

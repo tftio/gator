@@ -3,7 +3,6 @@
 //! Tests `create_plan_from_toml` and `get_plan_with_tasks` against a real
 //! PostgreSQL database. Each test creates an isolated temporary database.
 
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use gator_core::plan::{
@@ -37,12 +36,9 @@ depends_on = ["task-a"]
 "#;
     let plan_toml = parse_plan_toml(toml_str).expect("should parse");
 
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp/project")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/project")
         .await
         .expect("create_plan_from_toml should succeed");
-
-    // No invariants referenced, so no warnings about missing invariants.
-    assert!(warnings.is_empty(), "warnings: {warnings:?}");
 
     assert_eq!(plan.name, "Integration test plan");
     assert_eq!(plan.base_branch, "main");
@@ -74,7 +70,7 @@ depends_on = ["task-a"]
 }
 
 #[tokio::test]
-async fn create_plan_warns_on_unknown_invariants() {
+async fn create_plan_rejects_unknown_invariants() {
     let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
@@ -91,13 +87,14 @@ invariants = ["nonexistent_inv"]
 "#;
     let plan_toml = parse_plan_toml(toml_str).expect("should parse");
 
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp")
-        .await
-        .expect("should succeed despite unknown invariant");
+    let result = create_plan_from_toml(&pool, &plan_toml, "/tmp").await;
 
-    assert_eq!(plan.name, "Invariant warning test");
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("nonexistent_inv"));
+    assert!(result.is_err(), "should fail with unknown invariant");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("nonexistent_inv"),
+        "error should mention the missing invariant: {err_msg}"
+    );
 
     pool.close().await;
     drop_test_db(&db_name).await;
@@ -125,17 +122,13 @@ name = "t"
 description = "task with invariant"
 scope = "narrow"
 gate = "auto"
-invariants = ["my_check", "missing_one"]
+invariants = ["my_check"]
 "#;
     let plan_toml = parse_plan_toml(toml_str).expect("should parse");
 
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp")
         .await
         .expect("should succeed");
-
-    // One invariant linked, one warning.
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("missing_one"));
 
     // Verify the link was created.
     let task_list = tasks::list_tasks_for_plan(&pool, plan.id).await.unwrap();
@@ -177,7 +170,7 @@ gate = "auto"
 depends_on = ["alpha"]
 "#;
     let plan_toml = parse_plan_toml(toml_str).expect("should parse");
-    let (plan, _) = create_plan_from_toml(&pool, &plan_toml, "/tmp/proj")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/proj")
         .await
         .expect("create should succeed");
 
@@ -245,11 +238,9 @@ gate = "human_review"
 depends_on = ["left", "right"]
 "#;
     let plan_toml = parse_plan_toml(toml_str).expect("should parse");
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp")
         .await
         .expect("should succeed");
-
-    assert!(warnings.is_empty());
 
     let task_list = tasks::list_tasks_for_plan(&pool, plan.id).await.unwrap();
     assert_eq!(task_list.len(), 4);
@@ -309,10 +300,9 @@ depends_on = ["task-alpha", "task-beta"]
     let original_plan = parse_plan_toml(original_toml).expect("should parse original");
 
     // Step 2: Insert into DB.
-    let (plan, warnings) = create_plan_from_toml(&pool, &original_plan, "/tmp/roundtrip")
+    let plan = create_plan_from_toml(&pool, &original_plan, "/tmp/roundtrip")
         .await
         .expect("create should succeed");
-    assert!(warnings.is_empty());
 
     // Step 3: Materialize from DB.
     let materialized_toml = materialize_plan(&pool, plan.id)
@@ -438,10 +428,9 @@ invariants = ["rust_build"]
 "#;
 
     let original_plan = parse_plan_toml(original_toml).expect("should parse");
-    let (plan, warnings) = create_plan_from_toml(&pool, &original_plan, "/tmp/inv-roundtrip")
+    let plan = create_plan_from_toml(&pool, &original_plan, "/tmp/inv-roundtrip")
         .await
         .expect("create should succeed");
-    assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
 
     // Materialize.
     let materialized = materialize_plan(&pool, plan.id)
@@ -511,7 +500,7 @@ depends_on = ["root-task"]
 "#;
 
     let plan_toml = parse_plan_toml(toml_str).expect("should parse");
-    let (plan, _) = create_plan_from_toml(&pool, &plan_toml, "/tmp/task-mat")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/task-mat")
         .await
         .expect("create should succeed");
 

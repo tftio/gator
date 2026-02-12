@@ -19,10 +19,9 @@ use gator_test_utils::{create_test_db, drop_test_db};
 
 async fn create_test_plan(pool: &PgPool, toml_str: &str) -> gator_db::models::Plan {
     let plan_toml = parse_plan_toml(toml_str).expect("test TOML should parse");
-    let (plan, _warnings) = create_plan_from_toml(pool, &plan_toml, "/tmp/test-project")
+    create_plan_from_toml(pool, &plan_toml, "/tmp/test-project")
         .await
-        .expect("create_plan_from_toml should succeed");
-    plan
+        .expect("create_plan_from_toml should succeed")
 }
 
 // -----------------------------------------------------------------------
@@ -96,7 +95,7 @@ depends_on = ["task-a"]
 }
 
 #[tokio::test]
-async fn create_plan_warns_on_missing_invariants() {
+async fn create_plan_rejects_missing_invariants() {
     let (pool, db_name) = create_test_db().await;
 
     let toml_str = r#"
@@ -113,13 +112,14 @@ invariants = ["nonexistent_invariant"]
 "#;
 
     let plan_toml = parse_plan_toml(toml_str).expect("TOML should parse");
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
-        .await
-        .expect("create should succeed even with missing invariants");
+    let result = create_plan_from_toml(&pool, &plan_toml, "/tmp/test").await;
 
-    assert_eq!(plan.status, PlanStatus::Draft);
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("nonexistent_invariant"));
+    assert!(result.is_err(), "should fail with missing invariant");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("nonexistent_invariant"),
+        "error should mention the missing invariant: {err_msg}"
+    );
 
     pool.close().await;
     drop_test_db(&db_name).await;
@@ -146,11 +146,9 @@ invariants = ["my_check"]
 "#;
 
     let plan_toml = parse_plan_toml(toml_str).expect("TOML should parse");
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
         .await
         .expect("create should succeed");
-
-    assert!(warnings.is_empty(), "no warnings expected: {warnings:?}");
 
     // Verify the invariant was linked.
     let (_, found_tasks) = get_plan_with_tasks(&pool, plan.id)
@@ -296,10 +294,9 @@ invariants = ["build_check"]
 "#;
 
     let plan_toml = parse_plan_toml(toml_str).expect("TOML should parse");
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
         .await
         .expect("create should succeed");
-    assert!(warnings.is_empty());
 
     // Approve the plan.
     let approved = plans::approve_plan(&pool, plan.id)
@@ -363,7 +360,7 @@ invariants = ["check_a"]
 "#;
 
     let plan_toml = parse_plan_toml(toml_str).expect("TOML should parse");
-    let (plan, _) = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/test")
         .await
         .expect("create should succeed");
 
@@ -482,10 +479,9 @@ invariants = ["workflow_check"]
 "#;
 
     let plan_toml = parse_plan_toml(toml_str).expect("TOML should parse");
-    let (plan, warnings) = create_plan_from_toml(&pool, &plan_toml, "/tmp/workflow")
+    let plan = create_plan_from_toml(&pool, &plan_toml, "/tmp/workflow")
         .await
         .expect("create should succeed");
-    assert!(warnings.is_empty());
     assert_eq!(plan.status, PlanStatus::Draft);
 
     // 3. Show (list all) -- verify plan appears.

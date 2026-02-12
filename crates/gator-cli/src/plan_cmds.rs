@@ -493,10 +493,7 @@ async fn cmd_plan_generate(
 
     // c. Create and approve.
     let project_path = cwd.to_string_lossy();
-    let (plan, warnings) = create_plan_from_toml(pool, &meta_plan, &project_path).await?;
-    for w in &warnings {
-        eprintln!("warning: {w}");
-    }
+    let plan = create_plan_from_toml(pool, &meta_plan, &project_path).await?;
     let plan = plan_queries::approve_plan(pool, plan.id).await?;
 
     println!("  Meta-plan:    {} ({})", plan.name, plan.id);
@@ -735,7 +732,7 @@ async fn cmd_create(pool: &PgPool, file_path: &str) -> Result<()> {
         .to_string();
 
     // 4. Insert into DB.
-    let (plan, warnings) = create_plan_from_toml(pool, &plan_toml, &project_path).await?;
+    let plan = create_plan_from_toml(pool, &plan_toml, &project_path).await?;
 
     // 5. Count dependency edges.
     let dep_edges = task_queries::count_dependency_edges(pool, plan.id).await?;
@@ -748,15 +745,6 @@ async fn cmd_create(pool: &PgPool, file_path: &str) -> Result<()> {
     println!("  Status:           {}", plan.status);
     println!("  Tasks:            {}", plan_toml.tasks.len());
     println!("  Dependency edges: {}", dep_edges);
-
-    // 7. Print warnings (invariants not found, etc.).
-    if !warnings.is_empty() {
-        println!();
-        println!("Warnings:");
-        for w in &warnings {
-            println!("  - {}", w);
-        }
-    }
 
     Ok(())
 }

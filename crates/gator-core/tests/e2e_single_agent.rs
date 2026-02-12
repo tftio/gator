@@ -16,7 +16,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use sqlx::PgPool;
-use uuid::Uuid;
 
 use gator_db::models::{InvariantKind, InvariantScope, PlanStatus, TaskStatus};
 use gator_db::pool;
@@ -221,14 +220,10 @@ invariants = ["echo_test", "always_pass"]
     let plan_toml = parse_plan_toml(plan_toml_content).expect("plan TOML should parse");
 
     let project_path = harness.repo_path().to_string_lossy().to_string();
-    let (plan, warnings) = create_plan_from_toml(pool, &plan_toml, &project_path)
+    let plan = create_plan_from_toml(pool, &plan_toml, &project_path)
         .await
         .expect("create_plan_from_toml should succeed");
 
-    assert!(
-        warnings.is_empty(),
-        "should have no warnings, got: {warnings:?}"
-    );
     assert_eq!(plan.status, PlanStatus::Draft);
 
     // Verify plan + tasks.
@@ -495,10 +490,9 @@ invariants = ["always_true", "always_false"]
     let plan_toml = parse_plan_toml(plan_toml_content).expect("plan TOML should parse");
 
     let project_path = harness.repo_path().to_string_lossy().to_string();
-    let (plan, warnings) = create_plan_from_toml(pool, &plan_toml, &project_path)
+    let plan = create_plan_from_toml(pool, &plan_toml, &project_path)
         .await
         .expect("create_plan_from_toml should succeed");
-    assert!(warnings.is_empty());
 
     // Approve the plan.
     plan_db::approve_plan(pool, plan.id)
@@ -691,7 +685,7 @@ invariants = ["will_fail"]
 
     let plan_toml = parse_plan_toml(plan_toml_content).unwrap();
     let project_path = harness.repo_path().to_string_lossy().to_string();
-    let (plan, _) = create_plan_from_toml(pool, &plan_toml, &project_path)
+    let plan = create_plan_from_toml(pool, &plan_toml, &project_path)
         .await
         .unwrap();
     plan_db::approve_plan(pool, plan.id).await.unwrap();
