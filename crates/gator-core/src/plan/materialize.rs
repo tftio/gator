@@ -33,6 +33,7 @@ pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
 
     // Plan header.
     out.push_str("[plan]\n");
+    out.push_str(&format!("id = {}\n", toml_quote(&plan.id.to_string())));
     out.push_str(&format!("name = {}\n", toml_quote(&plan.name)));
     out.push_str(&format!(
         "base_branch = {}\n",

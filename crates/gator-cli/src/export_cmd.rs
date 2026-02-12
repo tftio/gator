@@ -9,10 +9,7 @@ pub async fn run_export_csv(
 ) -> anyhow::Result<()> {
     use std::io::Write;
 
-    let plan_id = plan_id
-        .map(uuid::Uuid::parse_str)
-        .transpose()
-        .context("invalid plan ID")?;
+    let plan_id = plan_id.map(crate::resolve::resolve_plan_id).transpose()?;
 
     // Query tasks, optionally filtered by plan
     let rows = if let Some(pid) = plan_id {

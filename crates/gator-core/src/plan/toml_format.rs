@@ -4,6 +4,7 @@
 //! deserialized via `serde` + the `toml` crate.
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Top-level structure of a `plan.toml` file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -18,6 +19,10 @@ pub struct PlanToml {
 /// Plan-level metadata in `[plan]`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlanMeta {
+    /// Plan UUID, set after `gator plan create` writes the plan to the database.
+    /// Absent in authored plan files, present once the plan has been created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
     /// Human-readable plan name.
     pub name: String,
     /// Git branch to use as the base for task branches.
@@ -176,6 +181,7 @@ gate = "auto"
     fn roundtrip_serialize_deserialize() {
         let plan = PlanToml {
             plan: PlanMeta {
+                id: None,
                 name: "Roundtrip test".to_owned(),
                 base_branch: "develop".to_owned(),
                 token_budget: None,

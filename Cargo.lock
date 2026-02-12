@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "gator-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -901,6 +901,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "toml_edit",
  "tower",
  "tower-http",
  "tracing",
@@ -910,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "gator-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -938,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "gator-db"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -954,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "gator-test-utils"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gator-db",
  "sqlx",

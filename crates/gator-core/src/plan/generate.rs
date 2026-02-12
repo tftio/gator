@@ -271,6 +271,7 @@ pub fn build_meta_plan(system_prompt: &str, base_branch: &str, gate: &str) -> Pl
     let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     PlanToml {
         plan: PlanMeta {
+            id: None,
             name: format!("_plan-gen-{timestamp}"),
             base_branch: base_branch.to_string(),
             token_budget: None,

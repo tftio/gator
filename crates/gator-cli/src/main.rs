@@ -10,6 +10,7 @@ mod merge_cmd;
 mod plan_cmds;
 mod pr_cmd;
 mod report_cmd;
+pub(crate) mod resolve;
 mod serve_cmd;
 mod status_cmd;
 mod tui;
@@ -59,7 +60,7 @@ pub enum Commands {
     },
     /// Dispatch a plan for execution
     Dispatch {
-        /// Plan ID to dispatch
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
         /// Maximum number of concurrent agents
         #[arg(long, default_value_t = 4)]
@@ -70,7 +71,7 @@ pub enum Commands {
     },
     /// Show plan status and task progress (omit plan_id to list all plans)
     Status {
-        /// Plan ID to show status for (omit to list all plans)
+        /// Plan ID (UUID or plan.toml path) to show status for (omit to list all plans)
         plan_id: Option<String>,
     },
     /// Show agent event log for a task
@@ -106,12 +107,12 @@ pub enum Commands {
     },
     /// Show token usage and duration report for a plan
     Report {
-        /// Plan ID to report on
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
     },
     /// Remove worktrees for completed tasks in a plan
     Cleanup {
-        /// Plan ID to clean up
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
         /// Remove worktrees for all tasks (not just passed)
         #[arg(long)]
@@ -119,7 +120,7 @@ pub enum Commands {
     },
     /// Merge passed task branches into the base branch
     Merge {
-        /// Plan ID to merge
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
         /// Show what would be merged without doing it
         #[arg(long)]
@@ -127,7 +128,7 @@ pub enum Commands {
     },
     /// Create a GitHub PR from a completed plan
     Pr {
-        /// Plan ID to create PR for
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
         /// Create as a draft PR
         #[arg(long)]
@@ -221,17 +222,17 @@ pub enum PlanCommands {
     },
     /// Show plan details (or list all plans)
     Show {
-        /// Plan ID to show (omit to list all)
+        /// Plan ID (UUID or plan.toml path) to show (omit to list all)
         plan_id: Option<String>,
     },
     /// Approve a plan for execution
     Approve {
-        /// Plan ID to approve
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
     },
     /// Export a plan from the database as TOML
     Export {
-        /// Plan ID to export
+        /// Plan ID (UUID) or path to a plan TOML file
         plan_id: String,
         /// Output file path (defaults to stdout)
         #[arg(long)]
@@ -308,7 +309,7 @@ pub enum PresetCommands {
 pub enum ExportCommands {
     /// Export plan/task data as CSV
     Csv {
-        /// Plan ID to export (omit to export all plans)
+        /// Plan ID (UUID or plan.toml path) to export (omit to export all plans)
         plan_id: Option<String>,
         /// Output file path (defaults to stdout)
         #[arg(long)]

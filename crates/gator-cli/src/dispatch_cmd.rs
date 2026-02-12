@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
 use gator_core::harness::{ClaudeCodeAdapter, HarnessRegistry};
 use gator_core::isolation;
@@ -23,9 +22,8 @@ pub async fn run_dispatch(
     timeout_secs: u64,
     token_config: &TokenConfig,
 ) -> Result<()> {
-    // Parse plan ID.
-    let plan_id =
-        Uuid::parse_str(plan_id_str).with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
+    // Parse plan ID (accepts UUID or path to plan.toml).
+    let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     // Load plan to get project_path.
     let plan = plan_db::get_plan(pool, plan_id)

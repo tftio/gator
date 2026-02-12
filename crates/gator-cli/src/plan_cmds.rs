@@ -725,19 +725,37 @@ async fn cmd_create(pool: &PgPool, file_path: &str) -> Result<()> {
     let plan_toml = parse_plan_toml(&content)
         .with_context(|| format!("failed to parse plan file: {}", file_path))?;
 
-    // 3. Determine the project path (current working directory).
+    // 3. Reject if the file already has a plan ID.
+    if plan_toml.plan.id.is_some() {
+        bail!(
+            "plan file {:?} already has an id field.\n\
+             This plan has already been created. Use `gator plan show` to inspect it,\n\
+             or remove the id field to re-create.",
+            file_path
+        );
+    }
+
+    // 4. Determine the project path (current working directory).
     let project_path = std::env::current_dir()
         .context("failed to get current directory")?
         .to_string_lossy()
         .to_string();
 
-    // 4. Insert into DB.
+    // 5. Insert into DB.
     let plan = create_plan_from_toml(pool, &plan_toml, &project_path).await?;
 
-    // 5. Count dependency edges.
+    // 6. Write plan ID back to the TOML file.
+    crate::resolve::write_plan_id_to_file(file_path, plan.id).with_context(|| {
+        format!(
+            "plan created (ID: {}), but failed to update {}",
+            plan.id, file_path
+        )
+    })?;
+
+    // 7. Count dependency edges.
     let dep_edges = task_queries::count_dependency_edges(pool, plan.id).await?;
 
-    // 6. Print summary.
+    // 8. Print summary.
     println!("Plan created successfully.");
     println!();
     println!("  Plan ID:          {}", plan.id);
@@ -745,6 +763,7 @@ async fn cmd_create(pool: &PgPool, file_path: &str) -> Result<()> {
     println!("  Status:           {}", plan.status);
     println!("  Tasks:            {}", plan_toml.tasks.len());
     println!("  Dependency edges: {}", dep_edges);
+    println!("  Written to:       {}", file_path);
 
     Ok(())
 }
@@ -805,9 +824,7 @@ async fn cmd_show_all(pool: &PgPool) -> Result<()> {
 
 /// Show detailed info for a single plan.
 async fn cmd_show_one(pool: &PgPool, plan_id_str: &str) -> Result<()> {
-    let plan_id: Uuid = plan_id_str
-        .parse()
-        .with_context(|| format!("invalid plan ID: {:?}", plan_id_str))?;
+    let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let (plan, tasks) = get_plan_with_tasks(pool, plan_id).await?;
 
@@ -892,9 +909,7 @@ async fn cmd_show_one(pool: &PgPool, plan_id_str: &str) -> Result<()> {
 /// Validates that all tasks have at least one invariant linked before
 /// approving.
 async fn cmd_approve(pool: &PgPool, plan_id_str: &str) -> Result<()> {
-    let plan_id: Uuid = plan_id_str
-        .parse()
-        .with_context(|| format!("invalid plan ID: {:?}", plan_id_str))?;
+    let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     // Check that all tasks have at least one invariant.
     let tasks_without = plan_queries::count_tasks_without_invariants(pool, plan_id).await?;
@@ -930,9 +945,7 @@ async fn cmd_approve(pool: &PgPool, plan_id_str: &str) -> Result<()> {
 
 /// Materialize a plan from the database as TOML and write to a file or stdout.
 async fn cmd_export(pool: &PgPool, plan_id_str: &str, output: Option<&str>) -> Result<()> {
-    let plan_id: Uuid = plan_id_str
-        .parse()
-        .with_context(|| format!("invalid plan ID: {:?}", plan_id_str))?;
+    let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let toml_content = materialize_plan(pool, plan_id).await?;
 

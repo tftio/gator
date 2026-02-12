@@ -2,7 +2,6 @@
 
 use anyhow::{Context, Result};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 use gator_db::queries::agent_events;
 use gator_db::queries::plans as plan_db;
@@ -10,8 +9,7 @@ use gator_db::queries::tasks as task_db;
 
 /// Run the report command.
 pub async fn run_report(pool: &PgPool, plan_id_str: &str) -> Result<()> {
-    let plan_id =
-        Uuid::parse_str(plan_id_str).with_context(|| format!("invalid plan ID: {plan_id_str}"))?;
+    let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let plan = plan_db::get_plan(pool, plan_id)
         .await?
