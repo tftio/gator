@@ -36,14 +36,18 @@ pub struct AuthSection {
 // Paths
 // -----------------------------------------------------------------------
 
-/// Return the gator config directory (`~/.config/gator` on Unix).
+/// Return the gator config directory.
+///
+/// Always uses XDG layout: `$XDG_CONFIG_HOME/gator` or `~/.config/gator`.
+/// We intentionally ignore the platform-specific `dirs::config_dir()`
+/// (which returns `~/Library/Application Support` on macOS).
 pub fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".config")
-        })
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        return PathBuf::from(xdg).join("gator");
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
         .join("gator")
 }
 
