@@ -8,6 +8,7 @@
 //! - `gator plan show [plan-id]`    -- show plan details or list all plans
 //! - `gator plan approve <plan-id>` -- transition a plan from draft to approved
 //! - `gator plan export <plan-id>`  -- export a plan as TOML
+//! - `gator plan reset <plan-id>`   -- reset a failed plan for re-dispatch
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -110,6 +111,10 @@ pub async fn run_plan_command(
         PlanCommands::Export { plan_id, output } => {
             let pool = pool.context("database connection required for plan export")?;
             cmd_export(pool, &plan_id, output.as_deref()).await
+        }
+        PlanCommands::Reset { plan_id } => {
+            let pool = pool.context("database connection required for plan reset")?;
+            cmd_reset(pool, &plan_id).await
         }
     }
 }
@@ -959,6 +964,40 @@ async fn cmd_export(pool: &PgPool, plan_id_str: &str, output: Option<&str>) -> R
             print!("{}", toml_content);
         }
     }
+
+    Ok(())
+}
+
+// -----------------------------------------------------------------------
+// gator plan reset <plan-id>
+// -----------------------------------------------------------------------
+
+/// Reset a failed plan so it can be re-dispatched.
+///
+/// Resets all non-passed tasks to `pending` with `attempt = 0`, then
+/// transitions the plan from `failed` to `approved`.
+async fn cmd_reset(pool: &PgPool, plan_id_str: &str) -> Result<()> {
+    let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
+
+    // Reset tasks first (while plan is still in `failed` status).
+    let tasks_reset = task_queries::reset_non_passed_tasks(pool, plan_id).await?;
+
+    // Count passed tasks (those left untouched).
+    let progress = task_queries::get_plan_progress(pool, plan_id).await?;
+    let tasks_kept = progress.passed;
+
+    // Transition plan status.
+    let plan = plan_queries::reset_plan(pool, plan_id).await?;
+
+    println!("Plan reset.");
+    println!();
+    println!("  Plan ID:      {}", plan.id);
+    println!("  Name:         {}", plan.name);
+    println!("  Status:       {}", plan.status);
+    println!("  Tasks reset:  {}", tasks_reset);
+    println!("  Tasks kept:   {} (passed)", tasks_kept);
+    println!();
+    println!("Next: gator dispatch {}", plan.id);
 
     Ok(())
 }

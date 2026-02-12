@@ -117,6 +117,38 @@ pub async fn approve_plan(pool: &PgPool, id: Uuid) -> Result<Plan> {
     }
 }
 
+/// Reset a failed plan back to `approved` so it can be re-dispatched.
+///
+/// Clears `completed_at`. Fails if the plan is not found or is not in
+/// `failed` status.
+pub async fn reset_plan(pool: &PgPool, id: Uuid) -> Result<Plan> {
+    let plan = sqlx::query_as::<_, Plan>(
+        "UPDATE plans \
+         SET status = 'approved', completed_at = NULL \
+         WHERE id = $1 AND status = 'failed' \
+         RETURNING *",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .context("failed to reset plan")?;
+
+    match plan {
+        Some(p) => Ok(p),
+        None => {
+            // Distinguish between "not found" and "wrong status".
+            let existing = get_plan(pool, id).await?;
+            match existing {
+                None => anyhow::bail!("plan {id} not found"),
+                Some(p) => anyhow::bail!(
+                    "plan {id} cannot be reset: current status is {:?} (must be failed)",
+                    p.status.to_string()
+                ),
+            }
+        }
+    }
+}
+
 /// Count tasks in a plan that have zero linked invariants.
 pub async fn count_tasks_without_invariants(pool: &PgPool, plan_id: Uuid) -> Result<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(

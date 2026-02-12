@@ -326,6 +326,30 @@ pub async fn is_plan_complete(pool: &PgPool, plan_id: Uuid) -> Result<bool> {
     Ok(row.0 == 0)
 }
 
+/// Reset all non-passed tasks in a plan back to `pending` with `attempt = 0`.
+///
+/// Clears `assigned_harness`, `worktree_path`, `started_at`, and
+/// `completed_at`. Tasks already in `passed` status are left alone.
+/// Returns the number of tasks reset.
+pub async fn reset_non_passed_tasks(pool: &PgPool, plan_id: Uuid) -> Result<u64> {
+    let result = sqlx::query(
+        "UPDATE tasks \
+         SET status = 'pending', \
+             attempt = 0, \
+             assigned_harness = NULL, \
+             worktree_path = NULL, \
+             started_at = NULL, \
+             completed_at = NULL \
+         WHERE plan_id = $1 AND status != 'passed'",
+    )
+    .bind(plan_id)
+    .execute(pool)
+    .await
+    .context("failed to reset non-passed tasks")?;
+
+    Ok(result.rows_affected())
+}
+
 /// Reset tasks stuck in intermediate states (assigned, running, checking)
 /// back to `failed` so they can be retried or escalated.
 ///

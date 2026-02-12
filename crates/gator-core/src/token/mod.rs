@@ -48,10 +48,16 @@ impl TokenConfig {
 
     /// Create a TokenConfig from the `GATOR_TOKEN_SECRET` environment variable.
     ///
-    /// Returns an error if the variable is not set.
+    /// The value must be a hex-encoded string (as written by `gator init`
+    /// and forwarded by the orchestrator). Returns an error if the variable
+    /// is missing or contains invalid hex.
     pub fn from_env() -> Result<Self, TokenError> {
-        let secret = std::env::var("GATOR_TOKEN_SECRET").map_err(|_| TokenError::MissingSecret)?;
-        Ok(Self::new(secret.into_bytes()))
+        let secret_hex =
+            std::env::var("GATOR_TOKEN_SECRET").map_err(|_| TokenError::MissingSecret)?;
+        let secret = hex::decode(&secret_hex).map_err(|e| {
+            TokenError::InvalidFormat(format!("GATOR_TOKEN_SECRET is not valid hex: {e}"))
+        })?;
+        Ok(Self::new(secret))
     }
 }
 

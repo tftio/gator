@@ -238,6 +238,11 @@ pub enum PlanCommands {
         #[arg(long)]
         output: Option<String>,
     },
+    /// Reset a failed plan so it can be re-dispatched
+    Reset {
+        /// Plan ID (UUID) or path to a plan TOML file
+        plan_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
