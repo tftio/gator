@@ -8,8 +8,6 @@ rust-version.workspace = true
 
 [dependencies]
 gator-db = { path = "../gator-db" }
-testcontainers.workspace = true
-testcontainers-modules = { workspace = true, features = ["postgres"] }
 sqlx.workspace = true
 tokio.workspace = true
 uuid.workspace = true
