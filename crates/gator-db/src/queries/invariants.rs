@@ -1,7 +1,7 @@
 //! Database query functions for the `invariants` table.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::models::{Invariant, InvariantKind, InvariantScope};
@@ -25,7 +25,7 @@ pub struct NewInvariant<'a> {
 ///
 /// If an invariant with the same name already exists, the insert is rejected
 /// via the UNIQUE constraint and an error is returned.
-pub async fn insert_invariant(pool: &PgPool, new: &NewInvariant<'_>) -> Result<Invariant> {
+pub async fn insert_invariant(pool: &SqlitePool, new: &NewInvariant<'_>) -> Result<Invariant> {
     let invariant = sqlx::query_as::<_, Invariant>(
         "INSERT INTO invariants (name, description, kind, command, args, \
          expected_exit_code, threshold, scope, timeout_secs) \
@@ -36,7 +36,7 @@ pub async fn insert_invariant(pool: &PgPool, new: &NewInvariant<'_>) -> Result<I
     .bind(new.description)
     .bind(new.kind)
     .bind(new.command)
-    .bind(new.args)
+    .bind(sqlx::types::Json(new.args))
     .bind(new.expected_exit_code)
     .bind(new.threshold)
     .bind(new.scope)
@@ -49,7 +49,7 @@ pub async fn insert_invariant(pool: &PgPool, new: &NewInvariant<'_>) -> Result<I
 }
 
 /// Fetch an invariant by its UUID.
-pub async fn get_invariant(pool: &PgPool, id: Uuid) -> Result<Option<Invariant>> {
+pub async fn get_invariant(pool: &SqlitePool, id: Uuid) -> Result<Option<Invariant>> {
     let invariant = sqlx::query_as::<_, Invariant>("SELECT * FROM invariants WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -60,7 +60,7 @@ pub async fn get_invariant(pool: &PgPool, id: Uuid) -> Result<Option<Invariant>>
 }
 
 /// Fetch an invariant by its unique name.
-pub async fn get_invariant_by_name(pool: &PgPool, name: &str) -> Result<Option<Invariant>> {
+pub async fn get_invariant_by_name(pool: &SqlitePool, name: &str) -> Result<Option<Invariant>> {
     let invariant = sqlx::query_as::<_, Invariant>("SELECT * FROM invariants WHERE name = $1")
         .bind(name)
         .fetch_optional(pool)
@@ -71,7 +71,7 @@ pub async fn get_invariant_by_name(pool: &PgPool, name: &str) -> Result<Option<I
 }
 
 /// List all invariants, ordered by name.
-pub async fn list_invariants(pool: &PgPool) -> Result<Vec<Invariant>> {
+pub async fn list_invariants(pool: &SqlitePool) -> Result<Vec<Invariant>> {
     let invariants = sqlx::query_as::<_, Invariant>("SELECT * FROM invariants ORDER BY name")
         .fetch_all(pool)
         .await
@@ -85,7 +85,7 @@ pub async fn list_invariants(pool: &PgPool) -> Result<Vec<Invariant>> {
 /// This will fail if the invariant is still linked to any tasks via the
 /// `task_invariants` table (foreign key constraint prevents orphaned
 /// references).
-pub async fn delete_invariant(pool: &PgPool, id: Uuid) -> Result<()> {
+pub async fn delete_invariant(pool: &SqlitePool, id: Uuid) -> Result<()> {
     // Check whether the invariant is linked to any tasks.
     let linked: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM task_invariants WHERE invariant_id = $1")
@@ -115,7 +115,7 @@ pub async fn delete_invariant(pool: &PgPool, id: Uuid) -> Result<()> {
 }
 
 /// Get all invariants linked to a given task.
-pub async fn get_invariants_for_task(pool: &PgPool, task_id: Uuid) -> Result<Vec<Invariant>> {
+pub async fn get_invariants_for_task(pool: &SqlitePool, task_id: Uuid) -> Result<Vec<Invariant>> {
     let invariants = sqlx::query_as::<_, Invariant>(
         "SELECT i.* FROM invariants i \
          JOIN task_invariants ti ON ti.invariant_id = i.id \
@@ -131,7 +131,11 @@ pub async fn get_invariants_for_task(pool: &PgPool, task_id: Uuid) -> Result<Vec
 }
 
 /// Link a task to an invariant. Idempotent (ON CONFLICT DO NOTHING).
-pub async fn link_task_invariant(pool: &PgPool, task_id: Uuid, invariant_id: Uuid) -> Result<()> {
+pub async fn link_task_invariant(
+    pool: &SqlitePool,
+    task_id: Uuid,
+    invariant_id: Uuid,
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO task_invariants (task_id, invariant_id) \
          VALUES ($1, $2) \

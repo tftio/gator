@@ -16,6 +16,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 gator-test-utils = { path = "../gator-test-utils" }

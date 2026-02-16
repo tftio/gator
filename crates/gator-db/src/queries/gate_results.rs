@@ -1,7 +1,7 @@
 //! Database query functions for the `gate_results` table.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
@@ -41,7 +41,7 @@ pub struct NewGateResult {
 
 /// Insert a new gate result row. Returns the inserted row with
 /// server-generated defaults (id, checked_at).
-pub async fn insert_gate_result(pool: &PgPool, new: &NewGateResult) -> Result<GateResult> {
+pub async fn insert_gate_result(pool: &SqlitePool, new: &NewGateResult) -> Result<GateResult> {
     let result = sqlx::query_as::<_, GateResult>(
         "INSERT INTO gate_results \
          (task_id, invariant_id, attempt, passed, exit_code, stdout, stderr, duration_ms) \
@@ -71,7 +71,7 @@ pub async fn insert_gate_result(pool: &PgPool, new: &NewGateResult) -> Result<Ga
 /// Get gate results for the task's latest (current) attempt, ordered by
 /// checked_at. Joins with invariants to include the invariant name.
 pub async fn get_latest_gate_results(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
 ) -> Result<Vec<GateResultWithName>> {
     let results = sqlx::query_as::<_, GateResultWithName>(
@@ -95,7 +95,7 @@ pub async fn get_latest_gate_results(
 /// Get all gate results for a given task and attempt, ordered by
 /// invariant name (via checked_at as a proxy for insertion order).
 pub async fn get_gate_results(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     attempt: i32,
 ) -> Result<Vec<GateResult>> {
