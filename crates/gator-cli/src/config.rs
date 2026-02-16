@@ -138,8 +138,8 @@ impl GatorConfig {
 
         // Token secret resolution.
         let token_config = if let Ok(secret_hex) = std::env::var("GATOR_TOKEN_SECRET") {
-            let bytes = hex::decode(&secret_hex)
-                .context("GATOR_TOKEN_SECRET env var is not valid hex")?;
+            let bytes =
+                hex::decode(&secret_hex).context("GATOR_TOKEN_SECRET env var is not valid hex")?;
             TokenConfig::new(bytes)
         } else if let Some(ref cfg) = file_config {
             let bytes = hex::decode(&cfg.auth.token_secret)
@@ -243,7 +243,12 @@ mod tests {
 
         // Even if env var is set, CLI flag wins.
         unsafe { std::env::set_var("GATOR_DATABASE_URL", "postgresql://env:5432/envdb") };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            )
+        };
 
         let config = GatorConfig::resolve(Some("postgresql://cli:5432/clidb")).unwrap();
         assert_eq!(config.db_config.database_url, "postgresql://cli:5432/clidb");
@@ -257,7 +262,12 @@ mod tests {
         let _lock = lock_env();
 
         unsafe { std::env::set_var("GATOR_DATABASE_URL", "postgresql://env:5432/envdb") };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            )
+        };
 
         let config = GatorConfig::resolve(None).unwrap();
         assert_eq!(config.db_config.database_url, "postgresql://env:5432/envdb");
@@ -271,7 +281,12 @@ mod tests {
         let _lock = lock_env();
 
         unsafe { std::env::remove_var("GATOR_DATABASE_URL") };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            )
+        };
 
         let config = GatorConfig::resolve(None).unwrap();
         assert_eq!(config.db_config.database_url, DbConfig::DEFAULT_URL);
