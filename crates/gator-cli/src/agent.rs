@@ -439,7 +439,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = guard::require_agent_mode(&config);
         assert!(result.is_ok(), "valid token should be accepted");
@@ -481,7 +486,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Init {
@@ -511,7 +521,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Plan {
@@ -540,7 +555,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Invariant {
@@ -569,7 +589,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         // Without a DB pool, the command should fail with a helpful message.
         let result = super::run_agent_mode(Commands::Task, None).await;
@@ -593,7 +618,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(Commands::Check, None).await;
         assert!(result.is_err());
@@ -616,7 +646,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Progress {
@@ -645,7 +680,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(Commands::Done, None).await;
         assert!(result.is_err());
