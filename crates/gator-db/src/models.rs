@@ -373,7 +373,7 @@ pub struct Invariant {
     pub description: Option<String>,
     pub kind: InvariantKind,
     pub command: String,
-    pub args: Vec<String>,
+    pub args: sqlx::types::Json<Vec<String>>,
     pub expected_exit_code: i32,
     pub threshold: Option<f32>,
     pub scope: InvariantScope,

@@ -1,58 +1,46 @@
 use std::env;
+use std::path::PathBuf;
 
 /// Database configuration.
 ///
-/// Reads from the `GATOR_DATABASE_URL` environment variable, falling back to
-/// `postgresql://localhost:5432/gator` when unset.
+/// Points at a SQLite database file. Reads from the `GATOR_DATABASE_URL`
+/// environment variable (as a file path), falling back to
+/// `~/.config/gator/gator.db` when unset.
 #[derive(Debug, Clone)]
 pub struct DbConfig {
-    /// Full PostgreSQL connection URL.
-    pub database_url: String,
+    /// Path to the SQLite database file.
+    pub db_path: PathBuf,
 }
 
 impl DbConfig {
-    /// The default connection URL used when no environment variable is set.
-    pub const DEFAULT_URL: &str = "postgresql://localhost:5432/gator";
-
     /// Build a config from the environment.
     ///
-    /// Priority: `GATOR_DATABASE_URL` env var, then the compile-time default.
+    /// Priority: `GATOR_DATABASE_URL` env var (interpreted as a file path),
+    /// then `~/.config/gator/gator.db`.
     pub fn from_env() -> Self {
-        let database_url =
-            env::var("GATOR_DATABASE_URL").unwrap_or_else(|_| Self::DEFAULT_URL.to_owned());
-        Self { database_url }
-    }
-
-    /// Build a config from an explicit URL (useful for tests and CLI flags).
-    pub fn new(database_url: impl Into<String>) -> Self {
+        if let Ok(url) = env::var("GATOR_DATABASE_URL") {
+            return Self {
+                db_path: PathBuf::from(url),
+            };
+        }
+        let config_dir = dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("gator");
         Self {
-            database_url: database_url.into(),
+            db_path: config_dir.join("gator.db"),
         }
     }
 
-    /// Extract the database name from the URL.
-    ///
-    /// Returns `None` if the URL cannot be parsed or has no path component.
-    pub fn database_name(&self) -> Option<&str> {
-        // URLs look like: postgresql://host:port/dbname or postgres://host:port/dbname
-        self.database_url
-            .rsplit('/')
-            .next()
-            .filter(|s| !s.is_empty())
+    /// Build a config from an explicit path (useful for tests and CLI flags).
+    pub fn new(db_path: impl Into<PathBuf>) -> Self {
+        Self {
+            db_path: db_path.into(),
+        }
     }
 
-    /// Return a URL pointing at the `postgres` maintenance database on the
-    /// same host. Used to issue `CREATE DATABASE` when the target DB does not
-    /// yet exist.
-    pub fn maintenance_url(&self) -> String {
-        match self.database_url.rfind('/') {
-            Some(pos) => {
-                let mut url = self.database_url[..pos].to_owned();
-                url.push_str("/postgres");
-                url
-            }
-            None => self.database_url.clone(),
-        }
+    /// Return the SQLite connection URL for this config.
+    pub fn database_url(&self) -> String {
+        format!("sqlite://{}?mode=rwc", self.db_path.display())
     }
 }
 
@@ -67,30 +55,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_url() {
-        let cfg = DbConfig::new(DbConfig::DEFAULT_URL);
-        assert_eq!(cfg.database_url, "postgresql://localhost:5432/gator");
+    fn new_from_path() {
+        let cfg = DbConfig::new("/tmp/test.db");
+        assert_eq!(cfg.db_path, PathBuf::from("/tmp/test.db"));
     }
 
     #[test]
-    fn database_name_extraction() {
-        let cfg = DbConfig::new("postgresql://localhost:5432/mydb");
-        assert_eq!(cfg.database_name(), Some("mydb"));
-    }
-
-    #[test]
-    fn maintenance_url_replaces_db() {
-        let cfg = DbConfig::new("postgresql://localhost:5432/gator");
-        assert_eq!(
-            cfg.maintenance_url(),
-            "postgresql://localhost:5432/postgres"
-        );
-    }
-
-    #[test]
-    fn explicit_new() {
-        let cfg = DbConfig::new("postgresql://remotehost:5433/other");
-        assert_eq!(cfg.database_url, "postgresql://remotehost:5433/other");
-        assert_eq!(cfg.database_name(), Some("other"));
+    fn database_url_format() {
+        let cfg = DbConfig::new("/tmp/test.db");
+        assert_eq!(cfg.database_url(), "sqlite:///tmp/test.db?mode=rwc");
     }
 }
