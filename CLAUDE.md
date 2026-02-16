@@ -67,10 +67,16 @@ gator invariant add rust_clippy --kind lint       --command cargo --args "clippy
 
 ### Per-feature
 
-1. **Write a plan TOML** decomposing the feature into tasks with dependencies, scope, and gate policy. See `README.md` for the plan format and an annotated example.
-
-2. **Import and approve:**
+1. **Write a plan TOML** decomposing the feature into tasks with dependencies, scope, and gate policy. Three ways:
    ```bash
+   gator plan init my-feature           # scaffold with project-aware defaults
+   gator plan generate "add auth"       # generate via Claude Code
+   # or write manually -- see README.md for format and annotated example
+   ```
+
+2. **Validate, import, and approve:**
+   ```bash
+   gator plan validate plan.toml        # optional: check structure without importing
    gator plan create plan.toml
    gator plan approve <plan-id>
    ```
@@ -89,10 +95,17 @@ gator invariant add rust_clippy --kind lint       --command cargo --args "clippy
    gator approve <task-id>      # approve a human-review task
    ```
 
-5. **Merge and ship:**
+5. **Recover if needed:**
+   ```bash
+   gator plan reset <plan-id>   # reset a failed plan for re-dispatch
+   ```
+
+6. **Merge and ship:**
    ```bash
    gator merge <plan-id>        # merge task branches into base_branch
    gator pr <plan-id>           # create GitHub PR
+   gator report <plan-id>       # token usage and duration report
+   gator export csv <plan-id>   # export task data as CSV
    gator cleanup <plan-id>      # remove worktrees
    ```
 
@@ -109,12 +122,15 @@ Four-crate workspace:
 
 ### Key abstractions
 
-- **`Harness` trait** (`gator-core/src/harness/trait_def.rs`) -- adapter interface for LLM agents. Object-safe (`Box<dyn Harness>`). Claude Code implementation in `claude_code.rs`.
+- **`Harness` trait** (`gator-core/src/harness/trait_def.rs`) -- adapter interface for LLM agents. Object-safe (`Box<dyn Harness>`). Claude Code implementation in `claude_code.rs`. Registry in `registry.rs`.
 - **`Isolation` trait** (`gator-core/src/isolation/mod.rs`) -- workspace backends. `WorktreeIsolation` uses git worktrees. `ContainerIsolation` uses sandboxed Docker with copy-in/copy-out (no bind mounts).
 - **Task state machine** (`gator-core/src/state/mod.rs`) -- `pending -> assigned -> running -> checking -> passed/failed`. Failed tasks retry up to `retry_max` (back to `assigned`), then `escalated`. Operators can override escalation back to `pending`. Optimistic locking on all transitions.
 - **Gate system** (`gator-core/src/gate/`) -- runs linked invariants against task output, evaluates verdict based on gate policy (auto/human_review/human_approve).
 - **Orchestrator** (`gator-core/src/orchestrator/`) -- DAG-aware fleet execution with semaphore-based concurrency control.
 - **HMAC tokens** (`gator-core/src/token/`) -- scoped to (task_id, attempt). Agents get `GATOR_AGENT_TOKEN` injected; presence triggers agent-mode CLI restriction.
+- **Presets** (`gator-core/src/presets/`) -- built-in invariant definitions for common project types (Rust, Node, Python, Go). Auto-detects project type from marker files (Cargo.toml, package.json, etc.). Embedded `invariants.toml`.
+- **Plan generation** (`gator-core/src/plan/generate.rs`) -- spawns Claude Code to decompose a feature description into a plan TOML. CLI entry point in `gator-cli/src/plan_cmds.rs`.
+- **HTTP server** (`gator-cli/src/serve_cmd.rs`) -- read-only API for browsing plans, tasks, and gate results. Default port 3000.
 
 ### Trust model
 
@@ -127,7 +143,7 @@ Two modes determined by `GATOR_AGENT_TOKEN` env var:
 PostgreSQL 18 is the single source of truth. One database instance supports multiple projects simultaneously (each plan carries its own `project_path`). Plan TOML files are imports; the DB is authoritative.
 
 - Migrations: `crates/gator-db/migrations/` (001-005)
-- Runtime migrator via `sqlx::migrate::Migrator` -- no compile-time `sqlx::migrate!` macro, no `DATABASE_URL` needed at build time
+- Compile-time embedded via `sqlx::migrate!()` macro (no `DATABASE_URL` env var needed at build time -- the macro reads SQL files from disk, not from a live database)
 - Connection pool: `gator-db/src/pool.rs` (max 5 connections, 10s acquire timeout)
 - Config: `GATOR_DATABASE_URL` env var, falls back to `postgresql://localhost:5432/gator`
 

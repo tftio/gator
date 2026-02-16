@@ -102,6 +102,7 @@ Plans are TOML files with a `[plan]` header and one or more `[[tasks]]` entries.
 | `token_budget` | no | unlimited | Total token cap (input + output) across all agents |
 | `default_harness` | no | `"claude-code"` | Harness for tasks that don't override it |
 | `isolation` | no | `"worktree"` | Isolation strategy: `"worktree"` or `"container"` |
+| `container_image` | no | -- | Docker image for container isolation (required when `isolation = "container"`) |
 
 ### `[[tasks]]` -- task entries
 
@@ -209,6 +210,36 @@ Creates the gator database (if it doesn't exist) and runs migrations.
 
 ### Plan management
 
+**`gator plan init`** -- Scaffold a new plan TOML with project-aware defaults.
+
+```
+gator plan init <name> [--project-type <type>] [--no-register] [-o <file>]
+```
+
+Auto-detects project type (rust, node, python, go) and pre-fills invariants.
+By default also registers preset invariants in the database. Use `--no-register`
+to skip database registration.
+
+**`gator plan generate`** -- Generate a plan TOML using Claude Code.
+
+```
+gator plan generate [description] [--file <file>] [-o <file>] [--base-branch <branch>]
+    [--no-validate] [--dry-run] [--gate <policy>]
+```
+
+Spawns Claude Code to decompose a feature description into a plan. If
+`description` is omitted, runs interactively. Use `--dry-run` to print the
+assembled prompt without spawning Claude.
+
+**`gator plan validate`** -- Validate a plan TOML file.
+
+```
+gator plan validate <file>
+```
+
+Parses the TOML and checks structure (task names, DAG, scope/gate values)
+without importing into the database.
+
 **`gator plan create`** -- Import a plan from a TOML file.
 
 ```
@@ -245,6 +276,14 @@ gator plan export <plan-id> [--output <file>]
 
 Materializes the plan from the database. Writes to stdout by default.
 
+**`gator plan reset`** -- Reset a failed plan for re-dispatch.
+
+```
+gator plan reset <plan-id>
+```
+
+Resets a failed plan and its non-passed tasks back to a dispatchable state.
+
 ### Invariants
 
 **`gator invariant add`** -- Define a reusable invariant.
@@ -274,6 +313,23 @@ gator invariant list [--verbose]
 ```
 gator invariant test <name>
 ```
+
+**`gator invariant presets list`** -- List available preset invariants.
+
+```
+gator invariant presets list [--project-type <type>]
+```
+
+Shows built-in invariant presets. Filter by project type (rust, node, python, go).
+
+**`gator invariant presets install`** -- Register preset invariants in the database.
+
+```
+gator invariant presets install [--project-type <type>]
+```
+
+Auto-detects the project type and registers matching preset invariants. Use
+`--project-type` to override detection.
 
 ### Execution
 
@@ -364,6 +420,35 @@ gator merge <plan-id> [--dry-run]
 gator pr <plan-id> [--draft] [--base <branch>]
 ```
 
+### Data and utilities
+
+**`gator export csv`** -- Export plan/task data as CSV.
+
+```
+gator export csv [plan-id] [--output <file>]
+```
+
+Exports task data for one plan (or all plans) as CSV. Writes to stdout by
+default.
+
+**`gator serve`** -- Start a read-only HTTP server for browsing gator state.
+
+```
+gator serve [--port <PORT>] [--bind <ADDR>]
+```
+
+Starts a read-only HTTP API on `127.0.0.1:3000` (configurable). Useful for
+integrations and dashboards.
+
+**`gator completions`** -- Generate shell completions.
+
+```
+gator completions <shell>
+```
+
+Generates completion scripts for `bash`, `elvish`, `fish`, `powershell`, or
+`zsh`. Pipe to a file in your shell's completion directory.
+
 ## Configuration
 
 ### Config file
@@ -433,21 +518,29 @@ gator-cli          gator-core              gator-db
    +-- agent.rs         |   +-- toml_format.rs  +-- queries/
    +-- plan_cmds.rs     |   +-- parser.rs       |   +-- plans.rs
    +-- dispatch_cmd.rs  |   +-- service.rs      |   +-- tasks.rs
-   +-- tui.rs           |   +-- materialize.rs  |   +-- invariants.rs
-   +-- ...              +-- state/              |   +-- gate_results.rs
-                        |   +-- mod.rs (FSM)    +-- pool.rs
-                        |   +-- dispatch.rs     +-- migrations/
-                        +-- gate/
+   +-- serve_cmd.rs     |   +-- materialize.rs  |   +-- invariants.rs
+   +-- report_cmd.rs    |   +-- generate.rs     |   +-- gate_results.rs
+   +-- export_cmd.rs    +-- state/              |   +-- agent_events.rs
+   +-- tui/             |   +-- mod.rs (FSM)    +-- pool.rs
+   |   +-- app.rs       |   +-- dispatch.rs     +-- config.rs
+   |   +-- ui.rs        |   +-- queries.rs      +-- migrations/
+   +-- ...              +-- gate/
                         |   +-- evaluator.rs
                         +-- harness/
                         |   +-- trait_def.rs
                         |   +-- claude_code.rs
+                        |   +-- registry.rs
                         +-- token/
                         |   +-- mod.rs (HMAC)
                         |   +-- guard.rs
+                        +-- presets/
+                        |   +-- mod.rs
+                        |   +-- invariants.toml
                         +-- orchestrator/
-                        +-- worktree/
                         +-- isolation/
+                        +-- worktree/
+                        +-- invariant/
+                        +-- lifecycle/
 ```
 
 - **PostgreSQL is the single source of truth.** Plan files are imports; the
