@@ -11,7 +11,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::TaskStatus;
@@ -66,7 +66,7 @@ impl TaskStateMachine {
     ///   (optimistic lock failure).
     /// - The task does not exist.
     pub async fn transition(
-        pool: &PgPool,
+        pool: &SqlitePool,
         task_id: Uuid,
         from: TaskStatus,
         to: TaskStatus,
@@ -126,7 +126,7 @@ impl TaskStateMachine {
     ///
     /// Fetches the task to check the attempt counter against `retry_max`,
     /// then atomically increments the attempt and resets the status.
-    async fn retry_transition(pool: &PgPool, task_id: Uuid) -> Result<()> {
+    async fn retry_transition(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
         let task = db::get_task(pool, task_id)
             .await?
             .with_context(|| format!("task {} not found", task_id))?;
@@ -162,7 +162,7 @@ impl TaskStateMachine {
     }
 
     /// Validate that all dependencies of a task are in `passed` status.
-    pub async fn check_dependencies(pool: &PgPool, task_id: Uuid) -> Result<()> {
+    pub async fn check_dependencies(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
         let dep_ids = db::get_task_dependencies(pool, task_id).await?;
 
         for dep_id in dep_ids {
@@ -187,7 +187,7 @@ impl TaskStateMachine {
     /// Assign a task: validate dependencies, set harness/worktree metadata,
     /// and transition `pending -> assigned`.
     pub async fn assign_task(
-        pool: &PgPool,
+        pool: &SqlitePool,
         task_id: Uuid,
         harness: &str,
         worktree_path: &Path,

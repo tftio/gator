@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::models::AgentEvent;
@@ -18,7 +18,7 @@ pub struct NewAgentEvent {
 
 /// Insert a new agent event row. Returns the inserted row with
 /// server-generated defaults (id, recorded_at).
-pub async fn insert_agent_event(pool: &PgPool, new: &NewAgentEvent) -> Result<AgentEvent> {
+pub async fn insert_agent_event(pool: &SqlitePool, new: &NewAgentEvent) -> Result<AgentEvent> {
     let event = sqlx::query_as::<_, AgentEvent>(
         "INSERT INTO agent_events (task_id, attempt, event_type, payload) \
          VALUES ($1, $2, $3, $4) \
@@ -43,7 +43,7 @@ pub async fn insert_agent_event(pool: &PgPool, new: &NewAgentEvent) -> Result<Ag
 /// Get all agent events for a given task and attempt, ordered by
 /// recorded_at ASC.
 pub async fn list_events_for_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     attempt: i32,
 ) -> Result<Vec<AgentEvent>> {
@@ -68,7 +68,7 @@ pub async fn list_events_for_task(
 
 /// Get all agent events for a given task across all attempts, ordered by
 /// attempt ASC then recorded_at ASC.
-pub async fn list_all_events_for_task(pool: &PgPool, task_id: Uuid) -> Result<Vec<AgentEvent>> {
+pub async fn list_all_events_for_task(pool: &SqlitePool, task_id: Uuid) -> Result<Vec<AgentEvent>> {
     let events = sqlx::query_as::<_, AgentEvent>(
         "SELECT * FROM agent_events \
          WHERE task_id = $1 \
@@ -86,11 +86,11 @@ pub async fn list_all_events_for_task(pool: &PgPool, task_id: Uuid) -> Result<Ve
 ///
 /// Sums `input_tokens` and `output_tokens` from token_usage events across all
 /// tasks in the plan. Returns `(total_input, total_output)`.
-pub async fn get_token_usage_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<(i64, i64)> {
+pub async fn get_token_usage_for_plan(pool: &SqlitePool, plan_id: Uuid) -> Result<(i64, i64)> {
     let row: (Option<i64>, Option<i64>) = sqlx::query_as(
         "SELECT \
-             COALESCE(SUM((ae.payload->>'input_tokens')::bigint), 0)::bigint, \
-             COALESCE(SUM((ae.payload->>'output_tokens')::bigint), 0)::bigint \
+             COALESCE(SUM(CAST(json_extract(ae.payload, '$.input_tokens') AS INTEGER)), 0), \
+             COALESCE(SUM(CAST(json_extract(ae.payload, '$.output_tokens') AS INTEGER)), 0) \
          FROM agent_events ae \
          JOIN tasks t ON t.id = ae.task_id \
          WHERE t.plan_id = $1 AND ae.event_type = 'token_usage'",
@@ -107,11 +107,11 @@ pub async fn get_token_usage_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<(i
 ///
 /// Sums `input_tokens` and `output_tokens` from token_usage events.
 /// Returns `(total_input, total_output)`.
-pub async fn get_token_usage_for_task(pool: &PgPool, task_id: Uuid) -> Result<(i64, i64)> {
+pub async fn get_token_usage_for_task(pool: &SqlitePool, task_id: Uuid) -> Result<(i64, i64)> {
     let row: (Option<i64>, Option<i64>) = sqlx::query_as(
         "SELECT \
-             COALESCE(SUM((payload->>'input_tokens')::bigint), 0)::bigint, \
-             COALESCE(SUM((payload->>'output_tokens')::bigint), 0)::bigint \
+             COALESCE(SUM(CAST(json_extract(payload, '$.input_tokens') AS INTEGER)), 0), \
+             COALESCE(SUM(CAST(json_extract(payload, '$.output_tokens') AS INTEGER)), 0) \
          FROM agent_events \
          WHERE task_id = $1 AND event_type = 'token_usage'",
     )
@@ -126,7 +126,7 @@ pub async fn get_token_usage_for_task(pool: &PgPool, task_id: Uuid) -> Result<(i
 /// Get the most recent agent events for a task, optionally filtered by
 /// attempt. Returns at most `limit` events (newest first).
 pub async fn get_recent_events_for_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     attempt: Option<i32>,
     limit: i64,
@@ -161,7 +161,7 @@ pub async fn get_recent_events_for_task(
 }
 
 /// Count the number of agent events for a given task and attempt.
-pub async fn count_events_for_task(pool: &PgPool, task_id: Uuid, attempt: i32) -> Result<i64> {
+pub async fn count_events_for_task(pool: &SqlitePool, task_id: Uuid, attempt: i32) -> Result<i64> {
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM agent_events \
          WHERE task_id = $1 AND attempt = $2",

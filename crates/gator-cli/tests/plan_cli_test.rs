@@ -4,7 +4,7 @@
 //! a real PostgreSQL instance. Each test creates an isolated temporary database
 //! and drops it on completion.
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_core::plan::{create_plan_from_toml, get_plan_with_tasks, parse_plan_toml};
@@ -17,7 +17,7 @@ use gator_test_utils::{create_test_db, drop_test_db};
 // CLI does without needing a file on disk).
 // -----------------------------------------------------------------------
 
-async fn create_test_plan(pool: &PgPool, toml_str: &str) -> gator_db::models::Plan {
+async fn create_test_plan(pool: &SqlitePool, toml_str: &str) -> gator_db::models::Plan {
     let plan_toml = parse_plan_toml(toml_str).expect("test TOML should parse");
     create_plan_from_toml(pool, &plan_toml, "/tmp/test-project")
         .await
@@ -28,7 +28,7 @@ async fn create_test_plan(pool: &PgPool, toml_str: &str) -> gator_db::models::Pl
 // Helper: insert a test invariant.
 // -----------------------------------------------------------------------
 
-async fn insert_test_invariant(pool: &PgPool, name: &str) -> gator_db::models::Invariant {
+async fn insert_test_invariant(pool: &SqlitePool, name: &str) -> gator_db::models::Invariant {
     let new = invariants::NewInvariant {
         name,
         description: Some("test invariant"),

@@ -1,9 +1,9 @@
 use anyhow::Context;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 /// Export plan/task data as CSV.
 pub async fn run_export_csv(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Option<&str>,
     output: Option<&str>,
 ) -> anyhow::Result<()> {

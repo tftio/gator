@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::TaskStatus;
@@ -16,7 +16,7 @@ use super::TaskStateMachine;
 /// Validates that all dependencies are `passed`, sets metadata,
 /// and transitions `pending -> assigned`.
 pub async fn assign_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     harness: &str,
     worktree_path: &Path,
@@ -27,40 +27,40 @@ pub async fn assign_task(
 /// Start a task: transition `assigned -> running`.
 ///
 /// Sets `started_at` to the current timestamp.
-pub async fn start_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn start_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     TaskStateMachine::transition(pool, task_id, TaskStatus::Assigned, TaskStatus::Running).await
 }
 
 /// Begin checking a task's invariants: transition `running -> checking`.
-pub async fn begin_checking(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn begin_checking(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     TaskStateMachine::transition(pool, task_id, TaskStatus::Running, TaskStatus::Checking).await
 }
 
 /// Mark a task as passed: transition `checking -> passed`.
 ///
 /// Sets `completed_at` to the current timestamp.
-pub async fn pass_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn pass_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     TaskStateMachine::transition(pool, task_id, TaskStatus::Checking, TaskStatus::Passed).await
 }
 
 /// Mark a task as failed: transition `checking -> failed`.
 ///
 /// Sets `completed_at` to the current timestamp.
-pub async fn fail_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn fail_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     TaskStateMachine::transition(pool, task_id, TaskStatus::Checking, TaskStatus::Failed).await
 }
 
 /// Retry a failed task: transition `failed -> assigned`.
 ///
 /// Increments the attempt counter. Fails if `attempt >= retry_max`.
-pub async fn retry_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn retry_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     TaskStateMachine::transition(pool, task_id, TaskStatus::Failed, TaskStatus::Assigned).await
 }
 
 /// Escalate a failed task: transition `failed -> escalated`.
 ///
 /// Sets `completed_at` to the current timestamp.
-pub async fn escalate_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn escalate_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     TaskStateMachine::transition(pool, task_id, TaskStatus::Failed, TaskStatus::Escalated).await
 }
 
@@ -68,7 +68,7 @@ pub async fn escalate_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
 ///
 /// This is the operator path for tasks awaiting human review/approval.
 /// The task must be in `checking` status.
-pub async fn approve_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn approve_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     let task = gator_db::queries::tasks::get_task(pool, task_id)
         .await?
         .with_context(|| format!("task {task_id} not found"))?;
@@ -87,7 +87,7 @@ pub async fn approve_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
 /// Operator rejection: transition a `checking` task to `failed`.
 ///
 /// The task can then be retried or escalated.
-pub async fn reject_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
+pub async fn reject_task(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     let task = gator_db::queries::tasks::get_task(pool, task_id)
         .await?
         .with_context(|| format!("task {task_id} not found"))?;
@@ -107,7 +107,7 @@ pub async fn reject_task(pool: &PgPool, task_id: Uuid) -> Result<()> {
 ///
 /// For `failed` tasks: respects retry_max unless `force` is true.
 /// For `escalated` tasks: always allowed (operator override).
-pub async fn operator_retry_task(pool: &PgPool, task_id: Uuid, force: bool) -> Result<()> {
+pub async fn operator_retry_task(pool: &SqlitePool, task_id: Uuid, force: bool) -> Result<()> {
     let task = gator_db::queries::tasks::get_task(pool, task_id)
         .await?
         .with_context(|| format!("task {task_id} not found"))?;

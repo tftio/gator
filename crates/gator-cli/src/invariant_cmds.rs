@@ -8,7 +8,7 @@
 //! - `gator invariant presets install` -- register preset invariants in the database
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use gator_core::invariant::runner::{self, InvariantResult};
 use gator_core::presets;
@@ -22,7 +22,7 @@ use crate::{InvariantCommands, PresetCommands};
 // -----------------------------------------------------------------------
 
 /// Dispatch an `InvariantCommands` variant to the appropriate handler.
-pub async fn run_invariant_command(command: InvariantCommands, pool: &PgPool) -> Result<()> {
+pub async fn run_invariant_command(command: InvariantCommands, pool: &SqlitePool) -> Result<()> {
     match command {
         InvariantCommands::Add {
             name,
@@ -80,7 +80,7 @@ struct AddParams {
 }
 
 /// Create a new invariant definition and insert it into the database.
-async fn cmd_add(pool: &PgPool, params: AddParams) -> Result<()> {
+async fn cmd_add(pool: &SqlitePool, params: AddParams) -> Result<()> {
     // Parse the kind enum.
     let kind: InvariantKind = params.kind.parse().map_err(|_| {
         anyhow::anyhow!(
@@ -143,7 +143,7 @@ async fn cmd_add(pool: &PgPool, params: AddParams) -> Result<()> {
 // -----------------------------------------------------------------------
 
 /// List all invariants in a table format, optionally with full details.
-async fn cmd_list(pool: &PgPool, verbose: bool) -> Result<()> {
+async fn cmd_list(pool: &SqlitePool, verbose: bool) -> Result<()> {
     let invs = invariants::list_invariants(pool).await?;
 
     if invs.is_empty() {
@@ -223,7 +223,7 @@ async fn cmd_list(pool: &PgPool, verbose: bool) -> Result<()> {
 ///
 /// Exits with code 0 if the invariant passed, or returns an error (which
 /// causes the process to exit with code 1) if it failed.
-async fn cmd_test(pool: &PgPool, name: &str) -> Result<()> {
+async fn cmd_test(pool: &SqlitePool, name: &str) -> Result<()> {
     let invariant = invariants::get_invariant_by_name(pool, name)
         .await?
         .with_context(|| format!("invariant {:?} not found", name))?;
@@ -364,7 +364,7 @@ fn cmd_presets_list(project_type_filter: Option<&str>) -> Result<()> {
 
 /// Detect project type (or use override) and register matching preset
 /// invariants in the database. Skips any that already exist.
-async fn cmd_presets_install(pool: &PgPool, project_type_override: Option<&str>) -> Result<()> {
+async fn cmd_presets_install(pool: &SqlitePool, project_type_override: Option<&str>) -> Result<()> {
     let project_type = match project_type_override {
         Some(pt) => {
             let known = presets::available_project_types();

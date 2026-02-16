@@ -1,14 +1,14 @@
 //! `gator gate` command: view gate results for a task.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::queries::gate_results;
 use gator_db::queries::tasks as task_db;
 
 /// Run the gate command: show invariant results for a task's current attempt.
-pub async fn run_gate(pool: &PgPool, task_id_str: &str) -> Result<()> {
+pub async fn run_gate(pool: &SqlitePool, task_id_str: &str) -> Result<()> {
     let task_id =
         Uuid::parse_str(task_id_str).with_context(|| format!("invalid task ID: {task_id_str}"))?;
 

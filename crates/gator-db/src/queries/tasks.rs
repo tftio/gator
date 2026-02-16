@@ -2,7 +2,7 @@
 //! `task_invariants` tables.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::models::{Task, TaskStatus};
@@ -14,7 +14,7 @@ use crate::models::{Task, TaskStatus};
 /// CHECK constraints on the `tasks` table (e.g. "narrow", "auto").
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Uuid,
     name: &str,
     description: &str,
@@ -23,11 +23,13 @@ pub async fn insert_task(
     retry_max: i32,
     requested_harness: Option<&str>,
 ) -> Result<Task> {
+    let id = Uuid::new_v4();
     let task = sqlx::query_as::<_, Task>(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          RETURNING *",
     )
+    .bind(id)
     .bind(plan_id)
     .bind(name)
     .bind(description)
@@ -43,7 +45,7 @@ pub async fn insert_task(
 }
 
 /// Fetch a single task by ID.
-pub async fn get_task(pool: &PgPool, id: Uuid) -> Result<Option<Task>> {
+pub async fn get_task(pool: &SqlitePool, id: Uuid) -> Result<Option<Task>> {
     let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -54,7 +56,7 @@ pub async fn get_task(pool: &PgPool, id: Uuid) -> Result<Option<Task>> {
 }
 
 /// List all tasks for a given plan, ordered by creation time.
-pub async fn list_tasks_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Task>> {
+pub async fn list_tasks_for_plan(pool: &SqlitePool, plan_id: Uuid) -> Result<Vec<Task>> {
     let tasks =
         sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE plan_id = $1 ORDER BY created_at ASC")
             .bind(plan_id)
@@ -66,7 +68,7 @@ pub async fn list_tasks_for_plan(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Tas
 }
 
 /// Update the status of a task.
-pub async fn update_task_status(pool: &PgPool, id: Uuid, status: TaskStatus) -> Result<()> {
+pub async fn update_task_status(pool: &SqlitePool, id: Uuid, status: TaskStatus) -> Result<()> {
     let result = sqlx::query("UPDATE tasks SET status = $1 WHERE id = $2")
         .bind(status)
         .bind(id)
@@ -85,7 +87,7 @@ pub async fn update_task_status(pool: &PgPool, id: Uuid, status: TaskStatus) -> 
 ///
 /// Uses `ON CONFLICT DO NOTHING` so this is idempotent.
 pub async fn insert_task_dependency(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     depends_on_id: Uuid,
 ) -> Result<()> {
@@ -103,7 +105,7 @@ pub async fn insert_task_dependency(
 }
 
 /// Get the IDs of all tasks that a given task depends on.
-pub async fn get_task_dependencies(pool: &PgPool, task_id: Uuid) -> Result<Vec<Uuid>> {
+pub async fn get_task_dependencies(pool: &SqlitePool, task_id: Uuid) -> Result<Vec<Uuid>> {
     let rows: Vec<(Uuid,)> =
         sqlx::query_as("SELECT depends_on FROM task_dependencies WHERE task_id = $1")
             .bind(task_id)
@@ -116,7 +118,7 @@ pub async fn get_task_dependencies(pool: &PgPool, task_id: Uuid) -> Result<Vec<U
 
 /// Get the names of all tasks that a given task depends on (resolving through
 /// the tasks table).
-pub async fn get_task_dependency_names(pool: &PgPool, task_id: Uuid) -> Result<Vec<String>> {
+pub async fn get_task_dependency_names(pool: &SqlitePool, task_id: Uuid) -> Result<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT dep.name FROM task_dependencies td \
          JOIN tasks dep ON dep.id = td.depends_on \
@@ -132,7 +134,7 @@ pub async fn get_task_dependency_names(pool: &PgPool, task_id: Uuid) -> Result<V
 }
 
 /// Count total dependency edges for a plan.
-pub async fn count_dependency_edges(pool: &PgPool, plan_id: Uuid) -> Result<i64> {
+pub async fn count_dependency_edges(pool: &SqlitePool, plan_id: Uuid) -> Result<i64> {
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM task_dependencies td \
          JOIN tasks t ON t.id = td.task_id \
@@ -149,7 +151,11 @@ pub async fn count_dependency_edges(pool: &PgPool, plan_id: Uuid) -> Result<i64>
 /// Link a task to an invariant.
 ///
 /// Uses `ON CONFLICT DO NOTHING` so this is idempotent.
-pub async fn link_task_invariant(pool: &PgPool, task_id: Uuid, invariant_id: Uuid) -> Result<()> {
+pub async fn link_task_invariant(
+    pool: &SqlitePool,
+    task_id: Uuid,
+    invariant_id: Uuid,
+) -> Result<()> {
     sqlx::query(
         "INSERT INTO task_invariants (task_id, invariant_id) VALUES ($1, $2) \
          ON CONFLICT DO NOTHING",
@@ -174,7 +180,7 @@ pub async fn link_task_invariant(pool: &PgPool, task_id: Uuid, invariant_id: Uui
 /// matches the expected `from` value. Returns the number of rows
 /// affected (0 means the status did not match).
 pub async fn transition_task_status(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     from: TaskStatus,
     to: TaskStatus,
@@ -204,7 +210,7 @@ pub async fn transition_task_status(
 /// incrementing the attempt counter and clearing timestamps. Uses
 /// optimistic locking on both status and the current attempt value.
 pub async fn transition_task_retry(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     current_attempt: i32,
 ) -> Result<u64> {
@@ -227,7 +233,7 @@ pub async fn transition_task_retry(
 
 /// Set the assigned harness and worktree path on a task.
 pub async fn assign_task_metadata(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     harness: &str,
     worktree_path: &str,
@@ -249,7 +255,7 @@ pub async fn assign_task_metadata(
 
 /// Get all tasks in a plan whose dependencies are all in `passed` status
 /// and whose own status is `pending` (i.e. ready to be assigned).
-pub async fn get_ready_tasks(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Task>> {
+pub async fn get_ready_tasks(pool: &SqlitePool, plan_id: Uuid) -> Result<Vec<Task>> {
     let tasks = sqlx::query_as::<_, Task>(
         "SELECT t.* \
          FROM tasks t \
@@ -283,9 +289,9 @@ pub struct PlanProgress {
 }
 
 /// Get a summary of task counts by status for a given plan.
-pub async fn get_plan_progress(pool: &PgPool, plan_id: Uuid) -> Result<PlanProgress> {
+pub async fn get_plan_progress(pool: &SqlitePool, plan_id: Uuid) -> Result<PlanProgress> {
     let rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT status::text, COUNT(*) as cnt \
+        "SELECT status, COUNT(*) as cnt \
          FROM tasks \
          WHERE plan_id = $1 \
          GROUP BY status",
@@ -313,7 +319,7 @@ pub async fn get_plan_progress(pool: &PgPool, plan_id: Uuid) -> Result<PlanProgr
 }
 
 /// Check whether all tasks in a plan have status `passed`.
-pub async fn is_plan_complete(pool: &PgPool, plan_id: Uuid) -> Result<bool> {
+pub async fn is_plan_complete(pool: &SqlitePool, plan_id: Uuid) -> Result<bool> {
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM tasks \
          WHERE plan_id = $1 AND status != 'passed'",
@@ -331,7 +337,7 @@ pub async fn is_plan_complete(pool: &PgPool, plan_id: Uuid) -> Result<bool> {
 /// Clears `assigned_harness`, `worktree_path`, `started_at`, and
 /// `completed_at`. Tasks already in `passed` status are left alone.
 /// Returns the number of tasks reset.
-pub async fn reset_non_passed_tasks(pool: &PgPool, plan_id: Uuid) -> Result<u64> {
+pub async fn reset_non_passed_tasks(pool: &SqlitePool, plan_id: Uuid) -> Result<u64> {
     let result = sqlx::query(
         "UPDATE tasks \
          SET status = 'pending', \
@@ -358,11 +364,11 @@ pub async fn reset_non_passed_tasks(pool: &PgPool, plan_id: Uuid) -> Result<u64>
 /// so the orchestrator can decide whether to retry or escalate.
 ///
 /// Returns the tasks that were reset.
-pub async fn reset_orphaned_tasks(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Task>> {
+pub async fn reset_orphaned_tasks(pool: &SqlitePool, plan_id: Uuid) -> Result<Vec<Task>> {
     let tasks = sqlx::query_as::<_, Task>(
         "UPDATE tasks \
          SET status = 'failed', \
-             completed_at = NOW() \
+             completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE plan_id = $1 \
            AND status IN ('assigned', 'running', 'checking') \
          RETURNING *",
@@ -380,7 +386,7 @@ pub async fn reset_orphaned_tasks(pool: &PgPool, plan_id: Uuid) -> Result<Vec<Ta
 /// This is the operator override path: escalated tasks have exhausted their
 /// normal retry budget, but the operator can force a retry.
 pub async fn retry_escalated_to_pending(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     current_attempt: i32,
 ) -> Result<u64> {
@@ -427,7 +433,7 @@ pub struct TaskWithPlanName {
 }
 
 /// List all tasks in `checking` status across all plans.
-pub async fn list_checking_tasks(pool: &PgPool) -> Result<Vec<TaskWithPlanName>> {
+pub async fn list_checking_tasks(pool: &SqlitePool) -> Result<Vec<TaskWithPlanName>> {
     let tasks = sqlx::query_as::<_, TaskWithPlanName>(
         "SELECT t.id, t.plan_id, t.name, t.description, t.scope_level, t.gate_policy, \
                 t.retry_max, t.status, t.assigned_harness, t.requested_harness, \
@@ -452,7 +458,7 @@ pub async fn list_checking_tasks(pool: &PgPool) -> Result<Vec<TaskWithPlanName>>
 /// resets to `pending` so the orchestrator's DAG scheduler can pick it up
 /// through the normal `get_ready_tasks` path.
 pub async fn retry_task_to_pending(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     current_attempt: i32,
 ) -> Result<u64> {

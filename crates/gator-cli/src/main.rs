@@ -39,15 +39,10 @@ struct Cli {
 pub enum Commands {
     /// Write a gator config file (no database required)
     Init {
-        /// PostgreSQL connection URL
-        #[arg(long, default_value = "postgresql://localhost:5432/gator")]
-        db_url: String,
         /// Overwrite existing config file
         #[arg(long)]
         force: bool,
     },
-    /// Initialize the gator database (requires config file or env vars)
-    DbInit,
     /// Plan management
     Plan {
         #[command(subcommand)]
@@ -323,7 +318,7 @@ pub enum ExportCommands {
 }
 
 /// Execute the `gator init` command: write config file.
-fn cmd_init(db_url: &str, force: bool) -> anyhow::Result<()> {
+async fn cmd_init(force: bool) -> anyhow::Result<()> {
     let path = config::config_path();
 
     if path.exists() && !force {
@@ -335,9 +330,13 @@ fn cmd_init(db_url: &str, force: bool) -> anyhow::Result<()> {
 
     let token_secret = config::generate_token_secret();
 
+    // Default SQLite DB lives next to the config file.
+    let db_path = config::config_dir().join("gator.db");
+    let db_path_str = db_path.to_string_lossy().to_string();
+
     let cfg = config::ConfigFile {
         database: config::DatabaseSection {
-            url: db_url.to_string(),
+            url: db_path_str.clone(),
         },
         auth: config::AuthSection {
             token_secret: token_secret.clone(),
@@ -346,45 +345,22 @@ fn cmd_init(db_url: &str, force: bool) -> anyhow::Result<()> {
 
     config::save_config(&cfg)?;
 
+    // Create the database and run migrations immediately.
+    let db_config = gator_db::config::DbConfig::new(&db_path);
+    let pool = gator_db::pool::create_pool(&db_config).await?;
+    gator_db::pool::run_migrations(&pool).await?;
+    pool.close().await;
+
     println!("Config written to {}", path.display());
-    println!("  database.url = {db_url}");
+    println!("  database = {}", db_path.display());
     println!(
         "  auth.token_secret = {}...{}",
         &token_secret[..8],
         &token_secret[56..]
     );
     println!();
-    println!("Next: run `gator db-init` to create and migrate the database.");
+    println!("Database created and migrations applied.");
 
-    Ok(())
-}
-
-/// Execute the `gator db-init` command: create database and run migrations.
-async fn cmd_db_init(cli_db_url: Option<&str>) -> anyhow::Result<()> {
-    let resolved = GatorConfig::resolve(cli_db_url)?;
-
-    println!("Initializing gator database...");
-
-    // 1. Create the database if it does not exist.
-    pool::ensure_database_exists(&resolved.db_config).await?;
-
-    // 2. Connect to the target database.
-    let db_pool = pool::create_pool(&resolved.db_config).await?;
-
-    // 3. Run migrations.
-    pool::run_migrations(&db_pool).await?;
-
-    // 4. Print success with table counts.
-    let counts = pool::table_counts(&db_pool).await?;
-    println!("Database ready. Tables:");
-    for (table, count) in &counts {
-        println!("  {table}: {count} rows");
-    }
-
-    // 5. Clean shutdown.
-    db_pool.close().await;
-
-    println!("gator db-init complete.");
     Ok(())
 }
 
@@ -430,11 +406,8 @@ async fn main() -> anyhow::Result<()> {
     // Operator mode (default): full command surface.
     // -----------------------------------------------------------------
     match cli.command {
-        Commands::Init { db_url, force } => {
-            cmd_init(&db_url, force)?;
-        }
-        Commands::DbInit => {
-            cmd_db_init(cli.database_url.as_deref()).await?;
+        Commands::Init { force } => {
+            cmd_init(force).await?;
         }
         Commands::Plan { command } => {
             // Determine whether this subcommand needs the orchestrator (DB + token config)

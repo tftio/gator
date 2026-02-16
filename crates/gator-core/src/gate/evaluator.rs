@@ -2,7 +2,7 @@
 //! [`GateAction`] based on the task's gate policy and retry eligibility.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::GatePolicy;
@@ -45,7 +45,7 @@ pub enum GateAction {
 /// - **`human_review`** / **`human_approve`**: Leave the task in `checking`
 ///   state and return [`GateAction::HumanRequired`].
 pub async fn evaluate_verdict(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     verdict: &GateVerdict,
 ) -> Result<GateAction> {

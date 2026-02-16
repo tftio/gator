@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 
 use gator_core::harness::{ClaudeCodeAdapter, HarnessRegistry};
@@ -16,7 +16,7 @@ use gator_db::queries::plans as plan_db;
 
 /// Run the dispatch command.
 pub async fn run_dispatch(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id_str: &str,
     max_agents: usize,
     timeout_secs: u64,

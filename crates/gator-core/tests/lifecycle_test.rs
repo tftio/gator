@@ -11,7 +11,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::{InvariantKind, InvariantScope, TaskStatus};
@@ -35,8 +35,8 @@ use gator_test_utils::{create_test_db, drop_test_db};
 // ===========================================================================
 
 struct TestHarness {
-    pool: PgPool,
-    db_name: String,
+    pool: SqlitePool,
+    db_name: PathBuf,
     repo_dir: tempfile::TempDir,
     worktree_base_dir: tempfile::TempDir,
     repo_path: PathBuf,
@@ -58,7 +58,7 @@ impl TestHarness {
         }
     }
 
-    fn pool(&self) -> &PgPool {
+    fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
@@ -203,7 +203,7 @@ impl Harness for MockHarness {
 // ===========================================================================
 
 /// Set up a plan with one task linked to an always-passing invariant.
-async fn setup_passing_task(pool: &PgPool, repo_path: &Path) -> (Uuid, gator_db::models::Task) {
+async fn setup_passing_task(pool: &SqlitePool, repo_path: &Path) -> (Uuid, gator_db::models::Task) {
     let plan = plan_db::insert_plan(
         pool,
         "lifecycle-plan",
@@ -261,7 +261,7 @@ async fn setup_passing_task(pool: &PgPool, repo_path: &Path) -> (Uuid, gator_db:
 
 /// Set up a plan with one task linked to a failing invariant.
 async fn setup_failing_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     repo_path: &Path,
     retry_max: i32,
 ) -> (Uuid, gator_db::models::Task) {

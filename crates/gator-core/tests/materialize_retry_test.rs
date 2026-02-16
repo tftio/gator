@@ -1,6 +1,6 @@
 //! Tests for retry feedback in task materialization (T018).
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::{InvariantKind, InvariantScope};
@@ -13,7 +13,7 @@ use gator_test_utils::{create_test_db, drop_test_db};
 use gator_core::plan::materialize_task;
 
 /// Create a plan + task + invariant, returning (task_id, invariant_id).
-async fn create_test_fixtures(pool: &PgPool) -> (Uuid, Uuid) {
+async fn create_test_fixtures(pool: &SqlitePool) -> (Uuid, Uuid) {
     let plan = plan_db::insert_plan(
         pool,
         "retry-plan",

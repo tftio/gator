@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -31,8 +31,8 @@ use gator_core::worktree::WorktreeManager;
 // ===========================================================================
 
 struct TestHarness {
-    pool: PgPool,
-    db_name: String,
+    pool: SqlitePool,
+    db_name: PathBuf,
     repo_dir: tempfile::TempDir,
     worktree_base_dir: tempfile::TempDir,
     repo_path: PathBuf,
@@ -54,7 +54,7 @@ impl TestHarness {
         }
     }
 
-    fn pool(&self) -> &PgPool {
+    fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
@@ -160,7 +160,11 @@ impl Harness for PassingMockHarness {
 // Helpers
 // ===========================================================================
 
-async fn create_invariant(pool: &PgPool, name: &str, command: &str) -> gator_db::models::Invariant {
+async fn create_invariant(
+    pool: &SqlitePool,
+    name: &str,
+    command: &str,
+) -> gator_db::models::Invariant {
     invariants::insert_invariant(
         pool,
         &NewInvariant {

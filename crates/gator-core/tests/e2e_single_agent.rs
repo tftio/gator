@@ -15,10 +15,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use gator_db::models::{InvariantKind, InvariantScope, PlanStatus, TaskStatus};
-use gator_db::pool;
 use gator_db::queries::gate_results;
 use gator_db::queries::invariants::{self, NewInvariant};
 use gator_db::queries::plans as plan_db;
@@ -42,8 +41,8 @@ use gator_test_utils::{create_test_db, drop_test_db};
 
 /// A self-cleaning test environment with a temporary database and git repo.
 struct TestHarness {
-    pool: PgPool,
-    db_name: String,
+    pool: SqlitePool,
+    db_name: PathBuf,
     repo_dir: tempfile::TempDir,
     worktree_base_dir: tempfile::TempDir,
     repo_path: PathBuf,
@@ -68,7 +67,7 @@ impl TestHarness {
     }
 
     /// Return a reference to the database pool.
-    fn pool(&self) -> &PgPool {
+    fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
@@ -136,7 +135,7 @@ fn create_temp_git_repo() -> (tempfile::TempDir, PathBuf) {
 
 /// Insert an invariant into the database.
 async fn insert_invariant(
-    pool: &PgPool,
+    pool: &SqlitePool,
     name: &str,
     command: &str,
     args: &[String],
@@ -177,11 +176,14 @@ async fn e2e_happy_path_single_agent_dispatch() {
     // Step 1: Bootstrap -- database is already migrated by the harness.
     // Verify tables exist.
     // -----------------------------------------------------------------
-    let counts = pool::table_counts(pool)
-        .await
-        .expect("table_counts should succeed");
+    let tables: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_sqlx%' ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("should list tables");
     assert!(
-        !counts.is_empty(),
+        !tables.is_empty(),
         "database should have tables after migration"
     );
 

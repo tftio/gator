@@ -7,7 +7,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
@@ -121,7 +121,7 @@ pub struct TaskDetailResponse {
 // Router
 // ---------------------------------------------------------------------------
 
-pub fn build_router(pool: PgPool) -> Router {
+pub fn build_router(pool: SqlitePool) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/plans", get(list_plans))
@@ -136,7 +136,7 @@ pub fn build_router(pool: PgPool) -> Router {
 // Entry point
 // ---------------------------------------------------------------------------
 
-pub async fn run_serve(pool: PgPool, bind: &str, port: u16) -> Result<()> {
+pub async fn run_serve(pool: SqlitePool, bind: &str, port: u16) -> Result<()> {
     let app = build_router(pool);
     let addr: SocketAddr = format!("{bind}:{port}").parse()?;
     tracing::info!("gator serve listening on http://{addr}");
@@ -158,7 +158,7 @@ async fn shutdown_signal() {
 // Handlers
 // ---------------------------------------------------------------------------
 
-async fn index(State(pool): State<PgPool>) -> Result<axum::response::Response, AppError> {
+async fn index(State(pool): State<SqlitePool>) -> Result<axum::response::Response, AppError> {
     let plans = plan_db::list_plans(&pool)
         .await
         .map_err(AppError::internal)?;
@@ -192,7 +192,7 @@ async fn index(State(pool): State<PgPool>) -> Result<axum::response::Response, A
     Ok(Html(html).into_response())
 }
 
-async fn list_plans(State(pool): State<PgPool>) -> Result<axum::response::Response, AppError> {
+async fn list_plans(State(pool): State<SqlitePool>) -> Result<axum::response::Response, AppError> {
     let plans = plan_db::list_plans(&pool)
         .await
         .map_err(AppError::internal)?;
@@ -212,7 +212,7 @@ async fn list_plans(State(pool): State<PgPool>) -> Result<axum::response::Respon
 }
 
 async fn get_plan_detail(
-    State(pool): State<PgPool>,
+    State(pool): State<SqlitePool>,
     Path(id): Path<Uuid>,
 ) -> Result<axum::response::Response, AppError> {
     let plan = plan_db::get_plan(&pool, id)
@@ -246,7 +246,7 @@ async fn get_plan_detail(
 }
 
 async fn get_task_detail(
-    State(pool): State<PgPool>,
+    State(pool): State<SqlitePool>,
     Path(id): Path<Uuid>,
 ) -> Result<axum::response::Response, AppError> {
     let task = task_db::get_task(&pool, id)
@@ -290,7 +290,7 @@ async fn get_task_detail(
 }
 
 async fn list_invariants_handler(
-    State(pool): State<PgPool>,
+    State(pool): State<SqlitePool>,
 ) -> Result<axum::response::Response, AppError> {
     let invariants = invariant_db::list_invariants(&pool)
         .await
@@ -307,7 +307,7 @@ async fn list_invariants_handler(
 mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use sqlx::PgPool;
+    use sqlx::SqlitePool;
     use tower::ServiceExt;
 
     use gator_db::models::{InvariantKind, InvariantScope};
@@ -320,7 +320,7 @@ mod tests {
     // HTTP helpers
     // -----------------------------------------------------------------------
 
-    async fn send_request(pool: PgPool, uri: &str) -> axum::response::Response {
+    async fn send_request(pool: SqlitePool, uri: &str) -> axum::response::Response {
         let app = super::build_router(pool);
         app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
             .await

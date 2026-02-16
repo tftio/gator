@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -57,7 +57,7 @@ struct LifecycleDone {
 ///
 /// Checks retry eligibility and uses `retry_task_to_pending` which resets
 /// the task to `pending` (unlike `dispatch::retry_task` which sets `assigned`).
-async fn orchestrator_retry(pool: &PgPool, task_id: Uuid) -> Result<()> {
+async fn orchestrator_retry(pool: &SqlitePool, task_id: Uuid) -> Result<()> {
     let task = task_db::get_task(pool, task_id)
         .await?
         .with_context(|| format!("task {} not found", task_id))?;
@@ -96,7 +96,7 @@ async fn orchestrator_retry(pool: &PgPool, task_id: Uuid) -> Result<()> {
 /// enforces a concurrency limit via a semaphore, retries failures when
 /// eligible, and escalates when retries are exhausted.
 pub async fn run_orchestrator(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Uuid,
     registry: &Arc<HarnessRegistry>,
     isolation: &Arc<dyn Isolation>,
@@ -426,7 +426,7 @@ pub async fn run_orchestrator(
 }
 
 /// Handle the result of a completed lifecycle.
-async fn handle_lifecycle_result(pool: &PgPool, done: &LifecycleDone) -> Result<()> {
+async fn handle_lifecycle_result(pool: &SqlitePool, done: &LifecycleDone) -> Result<()> {
     match &done.result {
         Ok(LifecycleResult::Passed) => {
             tracing::info!(

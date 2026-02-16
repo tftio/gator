@@ -205,6 +205,28 @@ tasks depend on implementation. This gives agents a solid base to build on.
 invariant. A task with zero invariants cannot be approved (`gator plan approve`
 rejects plans with unlinked tasks).
 
+### Expect to refine plans
+
+Generated plans almost always need human refinement. During dogfooding, `plan
+generate` produced over-engineered designs (trait abstractions, dual backends)
+when we wanted a straight replacement. Even hand-written plans benefit from
+review -- ambiguous task descriptions lead to agents guessing, and missing
+invariants leave tasks ungated.
+
+After generating or writing a plan:
+
+1. **Read every task description as if you were the agent.** Is there enough
+   context to complete the work without asking questions? Are file paths,
+   function signatures, and edge cases specified?
+2. **Pin design decisions.** If a task offers multiple approaches ("you could
+   use X or Y"), pick one. Agents perform better with a single clear direction.
+3. **Check invariant coverage.** Early tasks that can't pass `rust_test` yet
+   (because downstream code hasn't changed) should use lighter invariants like
+   `rust_fmt_check`. Tasks near the end of the DAG should include the full
+   suite.
+4. **Watch for scope creep.** A `medium` task touching 16 files is really
+   `broad`. Consider splitting it.
+
 ### Validate before importing
 
 ```bash

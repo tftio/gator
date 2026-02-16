@@ -13,7 +13,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::Stream;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -36,8 +36,8 @@ use gator_core::worktree::WorktreeManager;
 // ===========================================================================
 
 struct TestHarness {
-    pool: PgPool,
-    db_name: String,
+    pool: SqlitePool,
+    db_name: PathBuf,
     repo_dir: tempfile::TempDir,
     worktree_base_dir: tempfile::TempDir,
     repo_path: PathBuf,
@@ -59,7 +59,7 @@ impl TestHarness {
         }
     }
 
-    fn pool(&self) -> &PgPool {
+    fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
@@ -225,7 +225,7 @@ impl Harness for ConfigurableMockHarness {
 ///
 /// All tasks use the given invariant. Returns (plan_id, task_ids_by_name).
 async fn create_diamond_dag(
-    pool: &PgPool,
+    pool: &SqlitePool,
     repo_path: &str,
     invariant_id: Uuid,
     retry_max: i32,

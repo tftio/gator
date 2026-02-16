@@ -1,6 +1,6 @@
 //! Tests for the `agent_events` query module.
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::queries::agent_events::{self, NewAgentEvent};
@@ -12,7 +12,7 @@ use gator_test_utils::{create_test_db, drop_test_db};
 // ===========================================================================
 
 /// Create a plan and task so we have a valid task_id for FK constraints.
-async fn create_test_task(pool: &PgPool) -> Uuid {
+async fn create_test_task(pool: &SqlitePool) -> Uuid {
     let plan = gator_db::queries::plans::insert_plan(
         pool,
         "test-plan",

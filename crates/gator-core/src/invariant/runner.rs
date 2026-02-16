@@ -34,7 +34,7 @@ pub async fn run_invariant(invariant: &Invariant, working_dir: &Path) -> Result<
     let timeout = Duration::from_secs(invariant.timeout_secs.max(1) as u64);
 
     let mut child = Command::new(&invariant.command)
-        .args(&invariant.args)
+        .args(invariant.args.as_slice())
         .current_dir(working_dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -132,7 +132,7 @@ mod tests {
             description: None,
             kind: InvariantKind::Custom,
             command: command.to_owned(),
-            args: args.iter().map(|s| (*s).to_owned()).collect(),
+            args: sqlx::types::Json(args.iter().map(|s| (*s).to_owned()).collect()),
             expected_exit_code,
             threshold: None,
             scope: InvariantScope::Project,

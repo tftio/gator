@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::{Plan, Task};
@@ -34,7 +34,7 @@ pub use gator_db::queries::tasks::TaskWithPlanName;
 
 /// Application state for the TUI.
 pub struct App {
-    pub pool: PgPool,
+    pub pool: SqlitePool,
     pub current_view: View,
     pub plans: Vec<PlanRow>,
     pub selected_plan: usize,
@@ -50,7 +50,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool,
             current_view: View::PlanList,

@@ -181,25 +181,29 @@ async fn cannot_delete_linked_invariant() {
         .expect("insert invariant");
 
     // Create a plan and task to link the invariant to.
-    let plan_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ('test plan', '/tmp', 'main') RETURNING id",
+    let plan_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plans (id, name, project_path, base_branch) \
+         VALUES ($1, 'test plan', '/tmp', 'main')",
     )
-    .fetch_one(&pool)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert plan");
 
-    let task_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy) \
-         VALUES ($1, 'test task', 'desc', 'narrow', 'auto') RETURNING id",
+    let task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy) \
+         VALUES ($1, $2, 'test task', 'desc', 'narrow', 'auto')",
     )
-    .bind(plan_id.0)
-    .fetch_one(&pool)
+    .bind(task_id)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert task");
 
     // Link the invariant to the task.
-    invariants::link_task_invariant(&pool, task_id.0, inv.id)
+    invariants::link_task_invariant(&pool, task_id, inv.id)
         .await
         .expect("link should succeed");
 
@@ -234,33 +238,37 @@ async fn get_invariants_for_task() {
         .expect("insert b");
 
     // Create a plan and task.
-    let plan_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ('test plan', '/tmp', 'main') RETURNING id",
+    let plan_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plans (id, name, project_path, base_branch) \
+         VALUES ($1, 'test plan', '/tmp', 'main')",
     )
-    .fetch_one(&pool)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert plan");
 
-    let task_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy) \
-         VALUES ($1, 'test task', 'desc', 'narrow', 'auto') RETURNING id",
+    let task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy) \
+         VALUES ($1, $2, 'test task', 'desc', 'narrow', 'auto')",
     )
-    .bind(plan_id.0)
-    .fetch_one(&pool)
+    .bind(task_id)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert task");
 
     // Link both invariants.
-    invariants::link_task_invariant(&pool, task_id.0, inv_a.id)
+    invariants::link_task_invariant(&pool, task_id, inv_a.id)
         .await
         .expect("link a");
-    invariants::link_task_invariant(&pool, task_id.0, inv_b.id)
+    invariants::link_task_invariant(&pool, task_id, inv_b.id)
         .await
         .expect("link b");
 
     // Fetch invariants for task.
-    let linked = invariants::get_invariants_for_task(&pool, task_id.0)
+    let linked = invariants::get_invariants_for_task(&pool, task_id)
         .await
         .expect("get_invariants_for_task should succeed");
 
@@ -282,32 +290,36 @@ async fn link_task_invariant_is_idempotent() {
         .await
         .expect("insert invariant");
 
-    let plan_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ('test plan', '/tmp', 'main') RETURNING id",
+    let plan_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plans (id, name, project_path, base_branch) \
+         VALUES ($1, 'test plan', '/tmp', 'main')",
     )
-    .fetch_one(&pool)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert plan");
 
-    let task_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy) \
-         VALUES ($1, 'test task', 'desc', 'narrow', 'auto') RETURNING id",
+    let task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy) \
+         VALUES ($1, $2, 'test task', 'desc', 'narrow', 'auto')",
     )
-    .bind(plan_id.0)
-    .fetch_one(&pool)
+    .bind(task_id)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert task");
 
     // Link twice -- second call should be a no-op.
-    invariants::link_task_invariant(&pool, task_id.0, inv.id)
+    invariants::link_task_invariant(&pool, task_id, inv.id)
         .await
         .expect("first link");
-    invariants::link_task_invariant(&pool, task_id.0, inv.id)
+    invariants::link_task_invariant(&pool, task_id, inv.id)
         .await
         .expect("second link (idempotent)");
 
-    let linked = invariants::get_invariants_for_task(&pool, task_id.0)
+    let linked = invariants::get_invariants_for_task(&pool, task_id)
         .await
         .expect("get_invariants_for_task");
     assert_eq!(linked.len(), 1, "should only be linked once");
@@ -344,7 +356,7 @@ async fn insert_invariant_with_all_fields() {
     );
     assert_eq!(inserted.kind, InvariantKind::Coverage);
     assert_eq!(inserted.command, "cargo");
-    assert_eq!(inserted.args, vec!["--workspace", "--release"]);
+    assert_eq!(*inserted.args, vec!["--workspace", "--release"]);
     assert_eq!(inserted.expected_exit_code, 0);
     assert_eq!(inserted.threshold, Some(80.0));
     assert_eq!(inserted.scope, InvariantScope::Global);
@@ -370,24 +382,28 @@ async fn get_invariant_nonexistent_returns_none() {
 async fn get_invariants_for_task_with_no_links() {
     let (pool, db_name) = create_test_db().await;
 
-    let plan_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ('test plan', '/tmp', 'main') RETURNING id",
+    let plan_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plans (id, name, project_path, base_branch) \
+         VALUES ($1, 'test plan', '/tmp', 'main')",
     )
-    .fetch_one(&pool)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert plan");
 
-    let task_id: (Uuid,) = sqlx::query_as(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy) \
-         VALUES ($1, 'test task', 'desc', 'narrow', 'auto') RETURNING id",
+    let task_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy) \
+         VALUES ($1, $2, 'test task', 'desc', 'narrow', 'auto')",
     )
-    .bind(plan_id.0)
-    .fetch_one(&pool)
+    .bind(task_id)
+    .bind(plan_id)
+    .execute(&pool)
     .await
     .expect("insert task");
 
-    let linked = invariants::get_invariants_for_task(&pool, task_id.0)
+    let linked = invariants::get_invariants_for_task(&pool, task_id)
         .await
         .expect("should succeed");
     assert!(linked.is_empty());

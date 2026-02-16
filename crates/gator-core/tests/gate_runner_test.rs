@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::TaskStatus;
@@ -26,21 +26,22 @@ use gator_core::state::dispatch;
 // ---------------------------------------------------------------------------
 
 /// Insert a plan and return its UUID.
-async fn create_test_plan(pool: &PgPool) -> Uuid {
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ('test-plan', '/tmp/project', 'main') \
-         RETURNING id",
+async fn create_test_plan(pool: &SqlitePool) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plans (id, name, project_path, base_branch) \
+         VALUES ($1, 'test-plan', '/tmp/project', 'main')",
     )
-    .fetch_one(pool)
+    .bind(id)
+    .execute(pool)
     .await
     .expect("failed to insert test plan");
-    row.0
+    id
 }
 
 /// Insert a task with the given gate policy.
 async fn create_test_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Uuid,
     name: &str,
     gate_policy: &str,
@@ -62,7 +63,7 @@ async fn create_test_task(
 
 /// Insert an invariant that runs the given command.
 async fn create_test_invariant(
-    pool: &PgPool,
+    pool: &SqlitePool,
     name: &str,
     command: &str,
     args: &[String],
@@ -86,7 +87,7 @@ async fn create_test_invariant(
 
 /// Move a task from pending through to running state, setting up
 /// worktree metadata.
-async fn advance_task_to_running(pool: &PgPool, task_id: Uuid, worktree_path: &str) {
+async fn advance_task_to_running(pool: &SqlitePool, task_id: Uuid, worktree_path: &str) {
     dispatch::assign_task(pool, task_id, "test-harness", Path::new(worktree_path))
         .await
         .expect("assign should succeed");

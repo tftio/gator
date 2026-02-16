@@ -119,27 +119,26 @@ pub struct GatorConfig {
 impl GatorConfig {
     /// Resolve configuration using the chain: CLI flag > env var > config file > default.
     ///
-    /// - DB URL: `cli_db_url` > `GATOR_DATABASE_URL` env > `config_file.database.url` > `DbConfig::DEFAULT_URL`
+    /// - DB path: `cli_db_url` > `GATOR_DATABASE_URL` env > `config_file.database.url` > `DbConfig::from_env()`
     /// - Token secret: `GATOR_TOKEN_SECRET` env > `config_file.auth.token_secret` (hex-decoded) > error
     pub fn resolve(cli_db_url: Option<&str>) -> Result<Self> {
         let file_config = load_config().ok();
 
-        // DB URL resolution.
-        let db_url = if let Some(url) = cli_db_url {
-            url.to_string()
-        } else if let Ok(url) = std::env::var("GATOR_DATABASE_URL") {
-            url
+        // DB path resolution.
+        let db_config = if let Some(path) = cli_db_url {
+            DbConfig::new(path)
+        } else if let Ok(path) = std::env::var("GATOR_DATABASE_URL") {
+            DbConfig::new(path)
         } else if let Some(ref cfg) = file_config {
-            cfg.database.url.clone()
+            DbConfig::new(&cfg.database.url)
         } else {
-            DbConfig::DEFAULT_URL.to_string()
+            DbConfig::from_env()
         };
-        let db_config = DbConfig::new(db_url);
 
         // Token secret resolution.
         let token_config = if let Ok(secret_hex) = std::env::var("GATOR_TOKEN_SECRET") {
-            let bytes = hex::decode(&secret_hex)
-                .context("GATOR_TOKEN_SECRET env var is not valid hex")?;
+            let bytes =
+                hex::decode(&secret_hex).context("GATOR_TOKEN_SECRET env var is not valid hex")?;
             TokenConfig::new(bytes)
         } else if let Some(ref cfg) = file_config {
             let bytes = hex::decode(&cfg.auth.token_secret)
@@ -242,11 +241,19 @@ mod tests {
         let _lock = lock_env();
 
         // Even if env var is set, CLI flag wins.
-        unsafe { std::env::set_var("GATOR_DATABASE_URL", "postgresql://env:5432/envdb") };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55") };
+        unsafe { std::env::set_var("GATOR_DATABASE_URL", "/tmp/env.db") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            )
+        };
 
-        let config = GatorConfig::resolve(Some("postgresql://cli:5432/clidb")).unwrap();
-        assert_eq!(config.db_config.database_url, "postgresql://cli:5432/clidb");
+        let config = GatorConfig::resolve(Some("/tmp/cli.db")).unwrap();
+        assert_eq!(
+            config.db_config.database_url(),
+            "sqlite:///tmp/cli.db?mode=rwc"
+        );
 
         unsafe { std::env::remove_var("GATOR_DATABASE_URL") };
         unsafe { std::env::remove_var("GATOR_TOKEN_SECRET") };
@@ -256,11 +263,19 @@ mod tests {
     fn resolve_with_env_var_overrides_config_file() {
         let _lock = lock_env();
 
-        unsafe { std::env::set_var("GATOR_DATABASE_URL", "postgresql://env:5432/envdb") };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55") };
+        unsafe { std::env::set_var("GATOR_DATABASE_URL", "/tmp/env.db") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            )
+        };
 
         let config = GatorConfig::resolve(None).unwrap();
-        assert_eq!(config.db_config.database_url, "postgresql://env:5432/envdb");
+        assert_eq!(
+            config.db_config.database_url(),
+            "sqlite:///tmp/env.db?mode=rwc"
+        );
 
         unsafe { std::env::remove_var("GATOR_DATABASE_URL") };
         unsafe { std::env::remove_var("GATOR_TOKEN_SECRET") };
@@ -271,10 +286,20 @@ mod tests {
         let _lock = lock_env();
 
         unsafe { std::env::remove_var("GATOR_DATABASE_URL") };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55aa55",
+            )
+        };
 
         let config = GatorConfig::resolve(None).unwrap();
-        assert_eq!(config.db_config.database_url, DbConfig::DEFAULT_URL);
+        // Falls back to DbConfig::from_env() which defaults to ~/.config/gator/gator.db
+        assert!(
+            config.db_config.database_url().starts_with("sqlite://"),
+            "default should produce a sqlite URL, got: {}",
+            config.db_config.database_url()
+        );
 
         unsafe { std::env::remove_var("GATOR_TOKEN_SECRET") };
     }
@@ -292,7 +317,7 @@ mod tests {
         unsafe { std::env::set_var("HOME", tmp.path()) };
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 
-        let result = GatorConfig::resolve(Some("postgresql://localhost:5432/gator"));
+        let result = GatorConfig::resolve(Some("/tmp/gator.db"));
 
         // Restore env before asserting, to avoid poisoning the mutex on failure.
         match orig_home {

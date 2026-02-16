@@ -1,7 +1,7 @@
 //! Database query functions for the `plans` table.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::models::{Plan, PlanStatus};
@@ -10,7 +10,7 @@ use crate::models::{Plan, PlanStatus};
 /// defaults (id, created_at, status).
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_plan(
-    pool: &PgPool,
+    pool: &SqlitePool,
     name: &str,
     project_path: &str,
     base_branch: &str,
@@ -19,11 +19,13 @@ pub async fn insert_plan(
     isolation: &str,
     container_image: Option<&str>,
 ) -> Result<Plan> {
+    let id = Uuid::new_v4();
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO plans (id, name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          RETURNING *",
     )
+    .bind(id)
     .bind(name)
     .bind(project_path)
     .bind(base_branch)
@@ -39,7 +41,7 @@ pub async fn insert_plan(
 }
 
 /// Fetch a plan by its ID.
-pub async fn get_plan(pool: &PgPool, id: Uuid) -> Result<Option<Plan>> {
+pub async fn get_plan(pool: &SqlitePool, id: Uuid) -> Result<Option<Plan>> {
     let plan = sqlx::query_as::<_, Plan>("SELECT * FROM plans WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -50,7 +52,7 @@ pub async fn get_plan(pool: &PgPool, id: Uuid) -> Result<Option<Plan>> {
 }
 
 /// List all plans, ordered by creation time (newest first).
-pub async fn list_plans(pool: &PgPool) -> Result<Vec<Plan>> {
+pub async fn list_plans(pool: &SqlitePool) -> Result<Vec<Plan>> {
     let plans = sqlx::query_as::<_, Plan>("SELECT * FROM plans ORDER BY created_at DESC")
         .fetch_all(pool)
         .await
@@ -64,12 +66,12 @@ pub async fn list_plans(pool: &PgPool) -> Result<Vec<Plan>> {
 /// Conditionally sets timestamps:
 /// - `approved_at` when transitioning to `approved` (if not already set)
 /// - `completed_at` when transitioning to `completed` or `failed` (if not already set)
-pub async fn update_plan_status(pool: &PgPool, id: Uuid, status: PlanStatus) -> Result<()> {
+pub async fn update_plan_status(pool: &SqlitePool, id: Uuid, status: PlanStatus) -> Result<()> {
     let result = sqlx::query(
         "UPDATE plans SET \
            status = $1, \
-           approved_at = CASE WHEN $1 = 'approved' THEN COALESCE(approved_at, NOW()) ELSE approved_at END, \
-           completed_at = CASE WHEN $1 IN ('completed', 'failed') THEN COALESCE(completed_at, NOW()) ELSE completed_at END \
+           approved_at = CASE WHEN $1 = 'approved' THEN COALESCE(approved_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ELSE approved_at END, \
+           completed_at = CASE WHEN $1 IN ('completed', 'failed') THEN COALESCE(completed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ELSE completed_at END \
          WHERE id = $2",
     )
     .bind(status)
@@ -89,10 +91,10 @@ pub async fn update_plan_status(pool: &PgPool, id: Uuid, status: PlanStatus) -> 
 ///
 /// Returns the updated plan. Fails if the plan is not found or is not in
 /// `draft` status.
-pub async fn approve_plan(pool: &PgPool, id: Uuid) -> Result<Plan> {
+pub async fn approve_plan(pool: &SqlitePool, id: Uuid) -> Result<Plan> {
     let plan = sqlx::query_as::<_, Plan>(
         "UPDATE plans \
-         SET status = 'approved', approved_at = now() \
+         SET status = 'approved', approved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE id = $1 AND status = 'draft' \
          RETURNING *",
     )
@@ -121,7 +123,7 @@ pub async fn approve_plan(pool: &PgPool, id: Uuid) -> Result<Plan> {
 ///
 /// Clears `completed_at`. Fails if the plan is not found or is not in
 /// `failed` status.
-pub async fn reset_plan(pool: &PgPool, id: Uuid) -> Result<Plan> {
+pub async fn reset_plan(pool: &SqlitePool, id: Uuid) -> Result<Plan> {
     let plan = sqlx::query_as::<_, Plan>(
         "UPDATE plans \
          SET status = 'approved', completed_at = NULL \
@@ -150,7 +152,10 @@ pub async fn reset_plan(pool: &PgPool, id: Uuid) -> Result<Plan> {
 }
 
 /// Count tasks in a plan that have zero linked invariants.
-pub async fn count_tasks_without_invariants(pool: &PgPool, plan_id: Uuid) -> Result<Vec<String>> {
+pub async fn count_tasks_without_invariants(
+    pool: &SqlitePool,
+    plan_id: Uuid,
+) -> Result<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as(
         "SELECT t.name FROM tasks t \
          WHERE t.plan_id = $1 \

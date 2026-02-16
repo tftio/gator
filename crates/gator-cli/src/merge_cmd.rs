@@ -1,7 +1,7 @@
 //! `gator merge <plan-id>` command: merge passed task branches into the base branch.
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_core::worktree::{MergeResult, WorktreeManager};
@@ -10,7 +10,7 @@ use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
 /// Run the merge command.
-pub async fn run_merge(pool: &PgPool, plan_id_str: &str, dry_run: bool) -> Result<()> {
+pub async fn run_merge(pool: &SqlitePool, plan_id_str: &str, dry_run: bool) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let plan = plan_db::get_plan(pool, plan_id)
@@ -95,7 +95,7 @@ pub async fn run_merge(pool: &PgPool, plan_id_str: &str, dry_run: bool) -> Resul
 
 /// Build a map of task_id -> list of dependency task_ids.
 async fn build_dependency_map(
-    pool: &PgPool,
+    pool: &SqlitePool,
     tasks: &[gator_db::models::Task],
 ) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>> {
     let mut deps = std::collections::HashMap::new();

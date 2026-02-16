@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail};
 use gator_core::token::guard::{self, GuardError};
 use gator_core::token::{TokenClaims, TokenConfig};
 use gator_db::models::Invariant;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use crate::Commands;
 
@@ -37,7 +37,7 @@ use crate::Commands;
 /// - An operator-only command was attempted
 /// - A DB query fails
 /// - An invariant check fails (for `gator check`)
-pub async fn run_agent_mode(command: Commands, pool: Option<&PgPool>) -> Result<()> {
+pub async fn run_agent_mode(command: Commands, pool: Option<&SqlitePool>) -> Result<()> {
     // Validate the token first.
     let token_config =
         TokenConfig::from_env().context("GATOR_TOKEN_SECRET must be set for agent mode")?;
@@ -68,7 +68,7 @@ pub async fn run_agent_mode(command: Commands, pool: Option<&PgPool>) -> Result<
 ///
 /// Validates the token, looks up the task in the DB, and prints a clean
 /// markdown description that the LLM agent can consume.
-async fn cmd_task(claims: &TokenClaims, pool: Option<&PgPool>) -> Result<()> {
+async fn cmd_task(claims: &TokenClaims, pool: Option<&SqlitePool>) -> Result<()> {
     let pool = require_db(pool)?;
 
     // Look up the task by ID.
@@ -151,7 +151,7 @@ struct InvariantCheckResult {
 ///
 /// Looks up linked invariants, executes each in the current working
 /// directory, prints results, and exits 0 only if ALL pass.
-async fn cmd_check(claims: &TokenClaims, pool: Option<&PgPool>) -> Result<()> {
+async fn cmd_check(claims: &TokenClaims, pool: Option<&SqlitePool>) -> Result<()> {
     let pool = require_db(pool)?;
 
     // Look up linked invariants.
@@ -246,7 +246,7 @@ fn run_invariant_check(inv: &Invariant, cwd: &std::path::Path) -> Result<Invaria
     let start = Instant::now();
 
     let output = std::process::Command::new(&inv.command)
-        .args(&inv.args)
+        .args(inv.args.as_slice())
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -296,7 +296,11 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 // -----------------------------------------------------------------------
 
 /// `gator progress "message"` -- record a progress event.
-async fn cmd_progress(claims: &TokenClaims, pool: Option<&PgPool>, message: &str) -> Result<()> {
+async fn cmd_progress(
+    claims: &TokenClaims,
+    pool: Option<&SqlitePool>,
+    message: &str,
+) -> Result<()> {
     let pool = require_db(pool)?;
 
     let payload = serde_json::json!({
@@ -327,7 +331,7 @@ async fn cmd_progress(claims: &TokenClaims, pool: Option<&PgPool>, message: &str
 ///
 /// Records a done_signal event but does NOT change the task status.
 /// That is gator's (the orchestrator's) job.
-async fn cmd_done(claims: &TokenClaims, pool: Option<&PgPool>) -> Result<()> {
+async fn cmd_done(claims: &TokenClaims, pool: Option<&SqlitePool>) -> Result<()> {
     let pool = require_db(pool)?;
 
     let payload = serde_json::json!({
@@ -356,7 +360,7 @@ async fn cmd_done(claims: &TokenClaims, pool: Option<&PgPool>) -> Result<()> {
 // -----------------------------------------------------------------------
 
 /// Require that a database pool is available.
-fn require_db(pool: Option<&PgPool>) -> Result<&PgPool> {
+fn require_db(pool: Option<&SqlitePool>) -> Result<&SqlitePool> {
     pool.ok_or_else(|| {
         anyhow::anyhow!(
             "database connection required but not available; \
@@ -439,7 +443,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = guard::require_agent_mode(&config);
         assert!(result.is_ok(), "valid token should be accepted");
@@ -481,13 +490,15 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
-            Commands::Init {
-                db_url: "postgresql://localhost:5432/gator".into(),
-                force: false,
-            },
+            Commands::Init { force: false },
             None,
         )
         .await;
@@ -511,7 +522,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Plan {
@@ -540,7 +556,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Invariant {
@@ -569,7 +590,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         // Without a DB pool, the command should fail with a helpful message.
         let result = super::run_agent_mode(Commands::Task, None).await;
@@ -593,7 +619,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(Commands::Check, None).await;
         assert!(result.is_err());
@@ -616,7 +647,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(
             Commands::Progress {
@@ -645,7 +681,12 @@ mod tests {
 
         // SAFETY: serialized by mutex, test-only code.
         unsafe { std::env::set_var(AGENT_TOKEN_ENV, &token) };
-        unsafe { std::env::set_var("GATOR_TOKEN_SECRET", "6167656e742d6d6f64652d746573742d736563726574") };
+        unsafe {
+            std::env::set_var(
+                "GATOR_TOKEN_SECRET",
+                "6167656e742d6d6f64652d746573742d736563726574",
+            )
+        };
 
         let result = super::run_agent_mode(Commands::Done, None).await;
         assert!(result.is_err());

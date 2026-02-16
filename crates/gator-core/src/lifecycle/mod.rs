@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tracing;
 use uuid::Uuid;
 
@@ -64,7 +64,7 @@ pub struct LifecycleConfig {
 /// 10. Run gate on host worktree
 /// 11. Evaluate verdict -> return LifecycleResult
 pub async fn run_agent_lifecycle(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task: &Task,
     plan_name: &str,
     harness: &dyn Harness,
@@ -315,7 +315,7 @@ fn commit_agent_work(
 /// stop the collection. The function returns when the stream yields
 /// `AgentEvent::Completed` or the stream ends.
 async fn collect_events(
-    pool: &PgPool,
+    pool: &SqlitePool,
     task_id: Uuid,
     attempt: i32,
     mut stream: std::pin::Pin<Box<dyn futures::Stream<Item = AgentEvent> + Send>>,

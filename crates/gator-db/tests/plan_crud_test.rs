@@ -416,15 +416,17 @@ async fn link_task_invariant_roundtrip() {
         .unwrap();
 
     // Insert an invariant directly for testing.
-    let inv_row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO invariants (name, kind, command) VALUES ('test_inv', 'custom', 'true') \
-         RETURNING id",
+    let inv_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO invariants (id, name, kind, command) \
+         VALUES ($1, 'test_inv', 'custom', 'true')",
     )
-    .fetch_one(&pool)
+    .bind(inv_id)
+    .execute(&pool)
     .await
     .unwrap();
 
-    tasks::link_task_invariant(&pool, task.id, inv_row.0)
+    tasks::link_task_invariant(&pool, task.id, inv_id)
         .await
         .unwrap();
 
@@ -433,7 +435,7 @@ async fn link_task_invariant_roundtrip() {
         "SELECT COUNT(*) FROM task_invariants WHERE task_id = $1 AND invariant_id = $2",
     )
     .bind(task.id)
-    .bind(inv_row.0)
+    .bind(inv_id)
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -441,7 +443,7 @@ async fn link_task_invariant_roundtrip() {
     assert_eq!(linked.0, 1);
 
     // Idempotent: linking again should not error or duplicate.
-    tasks::link_task_invariant(&pool, task.id, inv_row.0)
+    tasks::link_task_invariant(&pool, task.id, inv_id)
         .await
         .unwrap();
 
@@ -449,7 +451,7 @@ async fn link_task_invariant_roundtrip() {
         "SELECT COUNT(*) FROM task_invariants WHERE task_id = $1 AND invariant_id = $2",
     )
     .bind(task.id)
-    .bind(inv_row.0)
+    .bind(inv_id)
     .fetch_one(&pool)
     .await
     .unwrap();
