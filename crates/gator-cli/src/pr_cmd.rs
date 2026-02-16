@@ -1,7 +1,7 @@
 //! `gator pr` command: create a GitHub PR from a completed plan.
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use gator_db::models::PlanStatus;
 use gator_db::queries::agent_events;
@@ -17,7 +17,7 @@ pub struct PrOptions {
 }
 
 /// Run the PR command.
-pub async fn run_pr(pool: &PgPool, plan_id_str: &str, options: &PrOptions) -> Result<()> {
+pub async fn run_pr(pool: &SqlitePool, plan_id_str: &str, options: &PrOptions) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let plan = plan_db::get_plan(pool, plan_id)

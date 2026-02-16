@@ -23,11 +23,13 @@ pub async fn insert_task(
     retry_max: i32,
     requested_harness: Option<&str>,
 ) -> Result<Task> {
+    let id = Uuid::new_v4();
     let task = sqlx::query_as::<_, Task>(
-        "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          RETURNING *",
     )
+    .bind(id)
     .bind(plan_id)
     .bind(name)
     .bind(description)

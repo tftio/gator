@@ -1,7 +1,7 @@
 //! `gator log` command: show agent events for a task.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::AgentEvent;
@@ -9,7 +9,7 @@ use gator_db::queries::agent_events;
 use gator_db::queries::tasks as task_db;
 
 /// Run the log command.
-pub async fn run_log(pool: &PgPool, task_id_str: &str, attempt: Option<i32>) -> Result<()> {
+pub async fn run_log(pool: &SqlitePool, task_id_str: &str, attempt: Option<i32>) -> Result<()> {
     let task_id =
         Uuid::parse_str(task_id_str).with_context(|| format!("invalid task ID: {task_id_str}"))?;
 

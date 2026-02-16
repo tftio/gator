@@ -42,12 +42,14 @@ pub struct NewGateResult {
 /// Insert a new gate result row. Returns the inserted row with
 /// server-generated defaults (id, checked_at).
 pub async fn insert_gate_result(pool: &SqlitePool, new: &NewGateResult) -> Result<GateResult> {
+    let id = Uuid::new_v4();
     let result = sqlx::query_as::<_, GateResult>(
         "INSERT INTO gate_results \
-         (task_id, invariant_id, attempt, passed, exit_code, stdout, stderr, duration_ms) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         (id, task_id, invariant_id, attempt, passed, exit_code, stdout, stderr, duration_ms) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          RETURNING *",
     )
+    .bind(id)
     .bind(new.task_id)
     .bind(new.invariant_id)
     .bind(new.attempt)

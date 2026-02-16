@@ -6,7 +6,7 @@
 //!   task, suitable for handing to an agent.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::queries::{
@@ -20,7 +20,7 @@ use super::toml_format::PlanToml;
 /// The output is valid TOML that can be parsed by [`super::parse_plan_toml`].
 /// Each task entry includes a `status` comment so readers can see progress,
 /// and a `status` field in the TOML itself.
-pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
+pub async fn materialize_plan(pool: &SqlitePool, plan_id: Uuid) -> Result<String> {
     let plan = plan_queries::get_plan(pool, plan_id)
         .await?
         .with_context(|| format!("plan {plan_id} not found"))?;
@@ -102,7 +102,7 @@ pub async fn materialize_plan(pool: &PgPool, plan_id: Uuid) -> Result<String> {
 ///
 /// It does NOT include plan-level context, other tasks' details, or database
 /// identifiers.
-pub async fn materialize_task(pool: &PgPool, task_id: Uuid) -> Result<String> {
+pub async fn materialize_task(pool: &SqlitePool, task_id: Uuid) -> Result<String> {
     let task = task_queries::get_task(pool, task_id)
         .await?
         .with_context(|| format!("task {task_id} not found"))?;
@@ -204,12 +204,12 @@ pub async fn materialize_task(pool: &PgPool, task_id: Uuid) -> Result<String> {
 
 /// Look up a task's status by name within a plan.
 async fn get_dependency_status_by_name(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Uuid,
     task_name: &str,
 ) -> Result<String> {
     let row: Option<(String,)> =
-        sqlx::query_as("SELECT status::text FROM tasks WHERE plan_id = $1 AND name = $2")
+        sqlx::query_as("SELECT status FROM tasks WHERE plan_id = $1 AND name = $2")
             .bind(plan_id)
             .bind(task_name)
             .fetch_optional(pool)

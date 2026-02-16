@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -51,7 +51,7 @@ use crate::PlanCommands;
 /// (one-shot with a description).
 pub async fn run_plan_command(
     command: PlanCommands,
-    pool: Option<&PgPool>,
+    pool: Option<&SqlitePool>,
     token_config: Option<&TokenConfig>,
 ) -> Result<()> {
     match command {
@@ -128,7 +128,7 @@ pub async fn run_plan_command(
 /// Detects the project type and base branch, optionally registers preset
 /// invariants in the database, and writes a starter plan TOML file.
 async fn cmd_plan_init(
-    pool: Option<&PgPool>,
+    pool: Option<&SqlitePool>,
     name: &str,
     project_type_override: Option<&str>,
     no_register: bool,
@@ -246,7 +246,7 @@ async fn cmd_plan_init(
 ///
 /// Returns `(registered, skipped)` name lists.
 async fn register_presets(
-    pool: &PgPool,
+    pool: &SqlitePool,
     preset_list: &[presets::InvariantPreset],
 ) -> Result<(Vec<String>, Vec<String>)> {
     let mut registered = vec![];
@@ -311,7 +311,7 @@ fn cmd_plan_validate(file: &str) -> Result<()> {
 // -----------------------------------------------------------------------
 
 /// Ensure plan-generation invariants exist in the database (idempotent).
-async fn ensure_plan_gen_invariants(pool: &PgPool) -> Result<()> {
+async fn ensure_plan_gen_invariants(pool: &SqlitePool) -> Result<()> {
     let invariants = [
         inv_queries::NewInvariant {
             name: "_gator_plan_file_exists",
@@ -399,7 +399,7 @@ fn generate_plan_toml(name: &str, base_branch: &str, invariant_names: &[&str]) -
 ///   the orchestrator, and validates the output with invariant gates.
 #[allow(clippy::too_many_arguments)]
 async fn cmd_plan_generate(
-    pool: Option<&PgPool>,
+    pool: Option<&SqlitePool>,
     token_config: Option<&TokenConfig>,
     description: Option<String>,
     file: Option<String>,
@@ -628,7 +628,7 @@ fn print_validation_result(output: &str) -> Result<()> {
 
 /// Handle the orchestrator result after a one-shot plan generation run.
 async fn handle_generate_result(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Uuid,
     result: &OrchestratorResult,
     output: &str,
@@ -721,7 +721,7 @@ fn copy_plan_from_worktree(worktree_path: Option<&str>, output: &str) -> Result<
 
 /// Read a plan.toml from disk, parse and validate it, insert into the DB,
 /// and print a summary.
-async fn cmd_create(pool: &PgPool, file_path: &str) -> Result<()> {
+async fn cmd_create(pool: &SqlitePool, file_path: &str) -> Result<()> {
     // 1. Read the file.
     let content = std::fs::read_to_string(file_path)
         .with_context(|| format!("failed to read plan file: {}", file_path))?;
@@ -778,7 +778,7 @@ async fn cmd_create(pool: &PgPool, file_path: &str) -> Result<()> {
 // -----------------------------------------------------------------------
 
 /// List all plans with summary info.
-async fn cmd_show_all(pool: &PgPool) -> Result<()> {
+async fn cmd_show_all(pool: &SqlitePool) -> Result<()> {
     let plans = plan_queries::list_plans(pool).await?;
 
     if plans.is_empty() {
@@ -828,7 +828,7 @@ async fn cmd_show_all(pool: &PgPool) -> Result<()> {
 // -----------------------------------------------------------------------
 
 /// Show detailed info for a single plan.
-async fn cmd_show_one(pool: &PgPool, plan_id_str: &str) -> Result<()> {
+async fn cmd_show_one(pool: &SqlitePool, plan_id_str: &str) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let (plan, tasks) = get_plan_with_tasks(pool, plan_id).await?;
@@ -913,7 +913,7 @@ async fn cmd_show_one(pool: &PgPool, plan_id_str: &str) -> Result<()> {
 ///
 /// Validates that all tasks have at least one invariant linked before
 /// approving.
-async fn cmd_approve(pool: &PgPool, plan_id_str: &str) -> Result<()> {
+async fn cmd_approve(pool: &SqlitePool, plan_id_str: &str) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     // Check that all tasks have at least one invariant.
@@ -949,7 +949,7 @@ async fn cmd_approve(pool: &PgPool, plan_id_str: &str) -> Result<()> {
 // -----------------------------------------------------------------------
 
 /// Materialize a plan from the database as TOML and write to a file or stdout.
-async fn cmd_export(pool: &PgPool, plan_id_str: &str, output: Option<&str>) -> Result<()> {
+async fn cmd_export(pool: &SqlitePool, plan_id_str: &str, output: Option<&str>) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let toml_content = materialize_plan(pool, plan_id).await?;
@@ -976,7 +976,7 @@ async fn cmd_export(pool: &PgPool, plan_id_str: &str, output: Option<&str>) -> R
 ///
 /// Resets all non-passed tasks to `pending` with `attempt = 0`, then
 /// transitions the plan from `failed` to `approved`.
-async fn cmd_reset(pool: &PgPool, plan_id_str: &str) -> Result<()> {
+async fn cmd_reset(pool: &SqlitePool, plan_id_str: &str) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     // Reset tasks first (while plan is still in `failed` status).

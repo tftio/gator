@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::{Plan, Task};
@@ -27,18 +27,20 @@ use super::toml_format::PlanToml;
 /// them up in the `invariants` table. If any referenced invariant does not
 /// exist, the entire operation fails and the transaction is rolled back.
 pub async fn create_plan_from_toml(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_toml: &PlanToml,
     project_path: &str,
 ) -> Result<Plan> {
     let mut tx = pool.begin().await.context("failed to begin transaction")?;
 
     // 1. Insert the plan row.
+    let plan_id = Uuid::new_v4();
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO plans (id, name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          RETURNING *",
     )
+    .bind(plan_id)
     .bind(&plan_toml.plan.name)
     .bind(project_path)
     .bind(&plan_toml.plan.base_branch)
@@ -54,11 +56,13 @@ pub async fn create_plan_from_toml(
     let mut task_name_to_id: HashMap<String, Uuid> = HashMap::new();
 
     for task_toml in &plan_toml.tasks {
+        let task_id = Uuid::new_v4();
         let task = sqlx::query_as::<_, Task>(
-            "INSERT INTO tasks (plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+            "INSERT INTO tasks (id, plan_id, name, description, scope_level, gate_policy, retry_max, requested_harness) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
              RETURNING *",
         )
+        .bind(task_id)
         .bind(plan.id)
         .bind(&task_toml.name)
         .bind(&task_toml.description)
@@ -149,7 +153,7 @@ pub async fn create_plan_from_toml(
 }
 
 /// Fetch a plan and all its tasks.
-pub async fn get_plan_with_tasks(pool: &PgPool, plan_id: Uuid) -> Result<(Plan, Vec<Task>)> {
+pub async fn get_plan_with_tasks(pool: &SqlitePool, plan_id: Uuid) -> Result<(Plan, Vec<Task>)> {
     let plan = plan_queries::get_plan(pool, plan_id)
         .await?
         .with_context(|| format!("plan {plan_id} not found"))?;

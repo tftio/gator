@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "gator-cli"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "gator-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -788,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "gator-db"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "gator-test-utils"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "gator-db",
  "sqlx",

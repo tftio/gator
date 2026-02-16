@@ -106,8 +106,9 @@ async fn create_plan_links_existing_invariants() {
 
     // Insert an invariant first.
     sqlx::query(
-        "INSERT INTO invariants (name, kind, command) VALUES ('my_check', 'custom', 'true')",
+        "INSERT INTO invariants (id, name, kind, command) VALUES ($1, 'my_check', 'custom', 'true')",
     )
+    .bind(Uuid::new_v4())
     .execute(&pool)
     .await
     .unwrap();
@@ -394,14 +395,16 @@ async fn roundtrip_with_invariants() {
 
     // Insert invariants into the DB first.
     sqlx::query(
-        "INSERT INTO invariants (name, kind, command) VALUES ('rust_build', 'custom', 'cargo')",
+        "INSERT INTO invariants (id, name, kind, command) VALUES ($1, 'rust_build', 'custom', 'cargo')",
     )
+    .bind(Uuid::new_v4())
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO invariants (name, kind, command) VALUES ('rust_test', 'test_suite', 'cargo')",
+        "INSERT INTO invariants (id, name, kind, command) VALUES ($1, 'rust_test', 'test_suite', 'cargo')",
     )
+    .bind(Uuid::new_v4())
     .execute(&pool)
     .await
     .unwrap();
@@ -472,9 +475,10 @@ async fn materialize_task_produces_clean_markdown() {
 
     // Insert invariants.
     sqlx::query(
-        "INSERT INTO invariants (name, description, kind, command, args) \
-         VALUES ('cargo_build', 'Compile the project', 'custom', 'cargo', '{build,--workspace}')",
+        "INSERT INTO invariants (id, name, description, kind, command, args) \
+         VALUES ($1, 'cargo_build', 'Compile the project', 'custom', 'cargo', '[\"build\",\"--workspace\"]')",
     )
+    .bind(Uuid::new_v4())
     .execute(&pool)
     .await
     .unwrap();

@@ -13,12 +13,12 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use app::App;
 
 /// Launch the interactive TUI dashboard.
-pub async fn run_dashboard(pool: PgPool) -> Result<()> {
+pub async fn run_dashboard(pool: SqlitePool) -> Result<()> {
     // Install panic hook to restore terminal on crash.
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {

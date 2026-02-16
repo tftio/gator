@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::TaskStatus;
@@ -24,21 +24,22 @@ use gator_core::state::queries;
 // ---------------------------------------------------------------------------
 
 /// Insert a plan and return its UUID.
-async fn create_test_plan(pool: &PgPool) -> Uuid {
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO plans (name, project_path, base_branch) \
-         VALUES ('test-plan', '/tmp/project', 'main') \
-         RETURNING id",
+async fn create_test_plan(pool: &SqlitePool) -> Uuid {
+    let id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO plans (id, name, project_path, base_branch) \
+         VALUES ($1, 'test-plan', '/tmp/project', 'main')",
     )
-    .fetch_one(pool)
+    .bind(id)
+    .execute(pool)
     .await
     .expect("failed to insert test plan");
-    row.0
+    id
 }
 
 /// Insert a task for a plan and return it.
 async fn create_test_task(
-    pool: &PgPool,
+    pool: &SqlitePool,
     plan_id: Uuid,
     name: &str,
     retry_max: i32,

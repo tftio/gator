@@ -1,7 +1,7 @@
 //! `gator status` command: show plan progress and per-task status.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
@@ -10,7 +10,7 @@ use gator_db::queries::tasks as task_db;
 ///
 /// When `plan_id_str` is `Some`, shows detailed status for that plan.
 /// When `None`, lists all plans with a progress summary.
-pub async fn run_status(pool: &PgPool, plan_id_str: Option<&str>) -> Result<()> {
+pub async fn run_status(pool: &SqlitePool, plan_id_str: Option<&str>) -> Result<()> {
     match plan_id_str {
         Some(id_str) => run_plan_status(pool, id_str).await,
         None => run_fleet_status(pool).await,
@@ -18,7 +18,7 @@ pub async fn run_status(pool: &PgPool, plan_id_str: Option<&str>) -> Result<()> 
 }
 
 /// Show detailed status for a single plan.
-async fn run_plan_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
+async fn run_plan_status(pool: &SqlitePool, plan_id_str: &str) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let plan = plan_db::get_plan(pool, plan_id)
@@ -80,7 +80,7 @@ async fn run_plan_status(pool: &PgPool, plan_id_str: &str) -> Result<()> {
 }
 
 /// List all plans with a progress summary.
-async fn run_fleet_status(pool: &PgPool) -> Result<()> {
+async fn run_fleet_status(pool: &SqlitePool) -> Result<()> {
     let plans = plan_db::list_plans(pool).await?;
 
     if plans.is_empty() {

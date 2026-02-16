@@ -1,7 +1,7 @@
 //! `gator cleanup <plan-id>` command: remove worktrees for completed tasks.
 
 use anyhow::{Context, Result};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 
 use gator_core::worktree::WorktreeManager;
 use gator_db::models::TaskStatus;
@@ -9,7 +9,7 @@ use gator_db::queries::plans as plan_db;
 use gator_db::queries::tasks as task_db;
 
 /// Run the cleanup command.
-pub async fn run_cleanup(pool: &PgPool, plan_id_str: &str, all: bool) -> Result<()> {
+pub async fn run_cleanup(pool: &SqlitePool, plan_id_str: &str, all: bool) -> Result<()> {
     let plan_id = crate::resolve::resolve_plan_id(plan_id_str)?;
 
     let plan = plan_db::get_plan(pool, plan_id)

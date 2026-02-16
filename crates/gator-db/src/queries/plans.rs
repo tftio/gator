@@ -19,11 +19,13 @@ pub async fn insert_plan(
     isolation: &str,
     container_image: Option<&str>,
 ) -> Result<Plan> {
+    let id = Uuid::new_v4();
     let plan = sqlx::query_as::<_, Plan>(
-        "INSERT INTO plans (name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+        "INSERT INTO plans (id, name, project_path, base_branch, token_budget, default_harness, isolation, container_image) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          RETURNING *",
     )
+    .bind(id)
     .bind(name)
     .bind(project_path)
     .bind(base_branch)

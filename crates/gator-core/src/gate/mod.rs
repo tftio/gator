@@ -10,7 +10,7 @@ pub mod evaluator;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use sqlx::PgPool;
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use gator_db::models::Invariant;
@@ -55,12 +55,12 @@ pub struct GateFailure {
 /// Runs gate checks for a task by executing its linked invariants and
 /// recording the results.
 pub struct GateRunner<'a> {
-    pool: &'a PgPool,
+    pool: &'a SqlitePool,
 }
 
 impl<'a> GateRunner<'a> {
     /// Create a new `GateRunner` backed by the given connection pool.
-    pub fn new(pool: &'a PgPool) -> Self {
+    pub fn new(pool: &'a SqlitePool) -> Self {
         Self { pool }
     }
 

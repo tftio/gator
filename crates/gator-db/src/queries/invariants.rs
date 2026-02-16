@@ -26,12 +26,14 @@ pub struct NewInvariant<'a> {
 /// If an invariant with the same name already exists, the insert is rejected
 /// via the UNIQUE constraint and an error is returned.
 pub async fn insert_invariant(pool: &SqlitePool, new: &NewInvariant<'_>) -> Result<Invariant> {
+    let id = Uuid::new_v4();
     let invariant = sqlx::query_as::<_, Invariant>(
-        "INSERT INTO invariants (name, description, kind, command, args, \
+        "INSERT INTO invariants (id, name, description, kind, command, args, \
          expected_exit_code, threshold, scope, timeout_secs) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
          RETURNING *",
     )
+    .bind(id)
     .bind(new.name)
     .bind(new.description)
     .bind(new.kind)
